@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Clip Merger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+TC:wght@400;500;600;700&display=swap">
+<style>
+:root {
+  --ground:  #ECEEED;
+  --surface: #FFFFFF;
+  --sunk:    #E2E5E4;
+  --ink:     #16191A;
+  --ink-2:   #5A6163;
+  --ink-3:   #868F8C;
+  --line:    #CDD3D2;
+  --line-2:  #E0E4E3;
+  --t1: #0B6E63;
+  --t2: #2C5FA8;
+  --t3: #8A5A00;
+  --t4: #A32A22;
+  --focus: #0B6E63;
+  --sans: "IBM Plex Sans TC", "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:  #121514;
+    --surface: #1A1E1D;
+    --sunk:    #0D100F;
+    --ink:     #E6EAE8;
+    --ink-2:   #929B98;
+    --ink-3:   #6C7573;
+    --line:    #2E3533;
+    --line-2:  #232928;
+    --t1: #4ECDC0;
+    --t2: #85AEEC;
+    --t3: #DDA43A;
+    --t4: #E8756A;
+    --focus: #4ECDC0;
+  }
+}
+:root[data-theme="dark"] {
+  --ground:  #121514;
+  --surface: #1A1E1D;
+  --sunk:    #0D100F;
+  --ink:     #E6EAE8;
+  --ink-2:   #929B98;
+  --ink-3:   #6C7573;
+  --line:    #2E3533;
+  --line-2:  #232928;
+  --t1: #4ECDC0;
+  --t2: #85AEEC;
+  --t3: #DDA43A;
+  --t4: #E8756A;
+  --focus: #4ECDC0;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 20px calc(28px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.masthead { display: flex; flex-direction: column; gap: 8px; }
+.eyebrow {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-3);
+}
+h1 { margin: 0; font-size: 25px; font-weight: 700; letter-spacing: -0.015em; }
+.lede { margin: 0; color: var(--ink-2); font-size: 14px; max-width: 60ch; }
+
+.sec-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; border-bottom: 1px solid var(--line); padding-bottom: 8px;
+}
+.sec-head h2 {
+  margin: 0; font-size: 12.5px; font-weight: 600; letter-spacing: 0.1em;
+  text-transform: uppercase; font-family: var(--mono);
+}
+.sec-head .count {
+  font-family: var(--mono); font-size: 12px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.btn {
+  font-family: var(--sans); font-size: 15px; font-weight: 600;
+  color: var(--surface); background: var(--ink); border: 1px solid var(--ink);
+  padding: 13px 20px; cursor: pointer; width: 100%; transition: opacity .15s ease;
+}
+.btn:hover { opacity: .84; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.ghost {
+  background: transparent; color: var(--ink); border-color: var(--line);
+  font-weight: 500; font-size: 14px; padding: 10px 16px; width: auto;
+}
+.btn:focus-visible, input:focus-visible, summary:focus-visible, .mini:focus-visible {
+  outline: 2px solid var(--focus); outline-offset: 2px;
+}
+input[type="file"] { display: none; }
+
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  padding: 20px; display: flex; flex-direction: column; gap: 16px;
+}
+.hint { font-size: 13px; color: var(--ink-2); margin: 0; }
+
+/* ---- clip rows ---- */
+.clips { display: flex; flex-direction: column; }
+.clip {
+  display: grid; grid-template-columns: 46px 1fr auto; gap: 12px;
+  padding: 14px 0; border-bottom: 1px solid var(--line-2); align-items: start;
+}
+.clip:first-child { border-top: 1px solid var(--line-2); }
+.thumb {
+  width: 46px; height: 82px; background: var(--sunk);
+  border: 1px solid var(--line-2); object-fit: cover; display: block;
+}
+.thumb-ph {
+  width: 46px; height: 82px; background: var(--sunk); border: 1px solid var(--line-2);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 9px; color: var(--ink-3);
+}
+.clip-body { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.clip-name {
+  font-family: var(--mono); font-size: 11.5px; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.clip-time {
+  font-family: var(--mono); font-size: 14px; font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; width: fit-content; }
+.chip { width: 8px; height: 8px; flex: none; border-radius: 50%; }
+.tier-1 { color: var(--t1); } .tier-1 .chip { background: var(--t1); }
+.tier-2 { color: var(--t2); } .tier-2 .chip { background: var(--t2); }
+.tier-3 { color: var(--t3); } .tier-3 .chip { background: var(--t3); }
+.tier-4 { color: var(--t4); } .tier-4 .chip { background: var(--t4); }
+.clip-spec {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.clip-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.sec-field { display: flex; align-items: center; gap: 4px; }
+.sec-field input {
+  width: 52px; font-family: var(--mono); font-size: 14px; font-weight: 500;
+  text-align: right; padding: 6px 7px; background: var(--surface);
+  color: var(--ink); border: 1px solid var(--line); font-variant-numeric: tabular-nums;
+}
+.sec-field .unit { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+.moves { display: flex; gap: 4px; }
+.mini {
+  font-family: var(--mono); font-size: 13px; line-height: 1;
+  background: transparent; color: var(--ink-2); border: 1px solid var(--line);
+  padding: 5px 8px; cursor: pointer;
+}
+.mini:disabled { opacity: .3; cursor: default; }
+.mini.danger { color: var(--t4); border-color: var(--t4); }
+.edited { font-family: var(--mono); font-size: 10px; color: var(--t3); }
+
+/* ---- controls ---- */
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+}
+.field-head label { font-size: 13.5px; font-weight: 500; }
+.field-val {
+  font-family: var(--mono); font-size: 15px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+input[type="range"] { width: 100%; accent-color: var(--focus); }
+.field-note { font-size: 12px; color: var(--ink-3); margin: 0; }
+
+.toggle { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.toggle input { margin-top: 3px; accent-color: var(--focus); width: 17px; height: 17px; flex: none; }
+.toggle-text { display: flex; flex-direction: column; gap: 2px; }
+.toggle-text strong { font-size: 13.5px; font-weight: 500; }
+.toggle-text span { font-size: 12px; color: var(--ink-3); }
+
+.radios { display: flex; gap: 8px; }
+.radios label {
+  flex: 1; display: flex; flex-direction: column; gap: 2px;
+  border: 1px solid var(--line); padding: 10px 12px; cursor: pointer;
+}
+.radios label:has(input:checked) { border-color: var(--focus); background: var(--sunk); }
+.radios input { display: none; }
+.radios strong { font-size: 13px; font-weight: 500; }
+.radios span { font-size: 11.5px; color: var(--ink-3); }
+
+.summary-line {
+  display: flex; justify-content: space-between; align-items: baseline;
+  padding-top: 4px; border-top: 1px solid var(--line-2); font-size: 13px;
+}
+.summary-line .big {
+  font-family: var(--mono); font-size: 17px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- progress ---- */
+.bar { height: 4px; background: var(--sunk); overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--focus); width: 0; transition: width .2s ease; }
+.prog-row {
+  display: flex; justify-content: space-between; font-family: var(--mono);
+  font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums;
+}
+
+/* ---- result ---- */
+video { width: 100%; background: #000; display: block; border: 1px solid var(--line); }
+.err { color: var(--t4); font-size: 13.5px; margin: 0; }
+.ok { color: var(--t1); font-size: 13px; margin: 0; }
+
+.empty {
+  color: var(--ink-3); font-size: 14px; text-align: center;
+  padding: 36px 0; border: 1px dashed var(--line);
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (max-width: 420px) {
+  h1 { font-size: 22px; }
+  .wrap { padding: 22px 16px 32px; }
+  .clip { grid-template-columns: 40px 1fr auto; gap: 10px; }
+  .thumb, .thumb-ph { width: 40px; height: 71px; }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Clip Merger</div>
+    <h1>依拍攝時間合併影片</h1>
+    <p class="lede">
+      選幾支影片，自動依拍攝時間排好，各取開頭幾秒接成一支。
+      全程在這台裝置上處理，影片不會上傳。
+    </p>
+  </header>
+
+  <button class="btn" id="pick" type="button">選擇影片</button>
+  <input type="file" id="file" accept="video/*,.mov,.mp4,.m4v" multiple>
+
+  <div class="empty" id="empty">尚未選擇影片</div>
+
+  <section id="list-sec" hidden>
+    <div class="sec-head">
+      <h2>片段順序</h2>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="clips" id="clips"></div>
+  </section>
+
+  <section id="ctrl-sec" hidden>
+    <div class="sec-head"><h2>輸出設定</h2></div>
+    <div class="card">
+
+      <div class="field">
+        <div class="field-head">
+          <label for="secs">每段秒數</label>
+          <span class="field-val"><span id="secs-val">3.0</span> 秒</span>
+        </div>
+        <input type="range" id="secs" min="0.5" max="15" step="0.5" value="3">
+        <p class="field-note">拖動會套用到所有片段；上方也可以單獨改某一段。</p>
+      </div>
+
+      <div class="field">
+        <div class="field-head"><label>畫面縮放</label></div>
+        <div class="radios">
+          <label>
+            <input type="radio" name="fit" value="contain" checked>
+            <strong>完整不裁切</strong>
+            <span>比例不同時補黑邊</span>
+          </label>
+          <label>
+            <input type="radio" name="fit" value="cover">
+            <strong>填滿裁切</strong>
+            <span>切掉超出的邊緣</span>
+          </label>
+        </div>
+      </div>
+
+      <label class="toggle">
+        <input type="checkbox" id="audio">
+        <span class="toggle-text">
+          <strong>保留原音</strong>
+          <span>沒有音軌的片段會自動留白，時間軸不會錯位。開啟會拉長編碼時間。</span>
+        </span>
+      </label>
+
+      <div class="summary-line">
+        <span>輸出 1080×1920 直式 · 30 fps · H.264</span>
+        <span class="big" id="total">0.0 秒</span>
+      </div>
+
+      <button class="btn" id="go" type="button">合併影片</button>
+      <p class="err" id="err" hidden></p>
+    </div>
+  </section>
+
+  <section id="prog-sec" hidden>
+    <div class="sec-head"><h2>處理中</h2></div>
+    <div class="card">
+      <div class="bar"><i id="bar"></i></div>
+      <div class="prog-row"><span id="prog-label">準備中</span><span id="prog-pct">0%</span></div>
+    </div>
+  </section>
+
+  <section id="out-sec" hidden>
+    <div class="sec-head">
+      <h2>完成</h2>
+      <span class="count" id="out-info"></span>
+    </div>
+    <div class="card">
+      <video id="preview" controls playsinline></video>
+      <button class="btn" id="save" type="button">儲存到相簿</button>
+      <a class="btn ghost" id="dl" download="merged.mp4" style="width:100%;text-align:center;text-decoration:none">下載檔案</a>
+      <p class="ok" id="save-msg" hidden></p>
+    </div>
+  </section>
+
+</div>
+
+<script type="module">
+import { inspectFile, TIERS } from "./mp4-time.js";
+import {
+  Input, BlobSource, ALL_FORMATS,
+  Output, Mp4OutputFormat, BufferTarget,
+  VideoSampleSource, VideoSample, VideoSampleSink, CanvasSink,
+  AudioBufferSource, AudioBufferSink,
+  QUALITY_HIGH, QUALITY_MEDIUM, canEncodeVideo,
+} from "./mediabunny.min.mjs";
+
+const OUT_W = 1080, OUT_H = 1920, OUT_FPS = 30, AUDIO_RATE = 48000;
+
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, "0");
+const fmtTime = d =>
+  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const mb = b => (b / 1048576).toFixed(0) + " MB";
+
+let clips = [];
+let busy = false;
+let outUrl = null;
+let outBlob = null;
+
+/* ---------- 選檔 ---------- */
+$("pick").addEventListener("click", () => $("file").click());
+
+$("file").addEventListener("change", async e => {
+  const files = [...e.target.files];
+  e.target.value = "";
+  if (!files.length) return;
+
+  $("pick").disabled = true;
+  $("pick").textContent = "讀取中…";
+
+  for (const f of files) {
+    const info = await inspectFile(f);
+    const natural = info.meta?.duration ?? null;
+    clips.push({
+      ...info,
+      naturalDuration: natural,
+      seconds: Math.min(3, natural ?? 3),
+      overridden: false,
+      thumb: null,
+      hasAudio: !!info.meta?.audio,
+    });
+  }
+  clips.sort((a, b) => a.date - b.date);
+
+  $("pick").disabled = false;
+  $("pick").textContent = "加入更多影片";
+  render();
+  makeThumbs();
+});
+
+/* ---------- 縮圖 ---------- */
+async function makeThumbs() {
+  for (const c of clips) {
+    if (c.thumb || c.error) continue;
+    try {
+      const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(c.file) });
+      const track = await input.getPrimaryVideoTrack();
+      if (!track) continue;
+      const sink = new CanvasSink(track, { width: 92, height: 164, fit: "cover" });
+      const wrapped = await sink.getCanvas(0);
+      if (!wrapped) continue;
+      c.thumb = wrapped.canvas.toDataURL("image/jpeg", 0.7);
+      render();
+    } catch { /* 縮圖失敗不影響合併 */ }
+  }
+}
+
+/* ---------- 畫面 ---------- */
+function totalSeconds() {
+  return clips.reduce((a, c) => a + c.seconds, 0);
+}
+
+function render() {
+  const has = clips.length > 0;
+  $("empty").hidden = has;
+  $("list-sec").hidden = !has;
+  $("ctrl-sec").hidden = !has;
+  if (!has) return;
+
+  $("count").textContent = clips.length + " 段";
+  $("total").textContent = totalSeconds().toFixed(1) + " 秒";
+
+  $("clips").innerHTML = clips.map((c, i) => {
+    const t = TIERS[c.tier];
+    const v = c.meta?.video;
+    const spec = [
+      v?.cw ? `${v.cw}×${v.ch}` : null,
+      c.naturalDuration ? `原長 ${c.naturalDuration.toFixed(0)}s` : null,
+      mb(c.size),
+      c.hasAudio ? null : "無音軌",
+    ].filter(Boolean).join("  ·  ");
+
+    return `
+      <div class="clip">
+        ${c.thumb
+          ? `<img class="thumb" src="${c.thumb}" alt="">`
+          : `<div class="thumb-ph">${c.error ? "!" : "…"}</div>`}
+        <div class="clip-body">
+          <div class="clip-name">${c.name}</div>
+          <div class="clip-time">${fmtTime(c.date)}</div>
+          <div class="badge tier-${c.tier}"><span class="chip"></span>${t.label}</div>
+          <div class="clip-spec">${spec}</div>
+        </div>
+        <div class="clip-side">
+          <div class="sec-field">
+            <input type="number" data-i="${i}" class="sec-in" min="0.5"
+                   max="${(c.naturalDuration ?? 60).toFixed(1)}" step="0.5" value="${c.seconds.toFixed(1)}">
+            <span class="unit">秒</span>
+          </div>
+          ${c.overridden ? '<span class="edited">已微調</span>' : ""}
+          <div class="moves">
+            <button class="mini" data-up="${i}" ${i === 0 ? "disabled" : ""} aria-label="上移">↑</button>
+            <button class="mini" data-down="${i}" ${i === clips.length - 1 ? "disabled" : ""} aria-label="下移">↓</button>
+            <button class="mini danger" data-del="${i}" aria-label="移除">×</button>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+$("clips").addEventListener("click", e => {
+  const b = e.target.closest("button");
+  if (!b || busy) return;
+  const up = b.dataset.up, down = b.dataset.down, del = b.dataset.del;
+  if (up !== undefined) { const i = +up; [clips[i - 1], clips[i]] = [clips[i], clips[i - 1]]; }
+  else if (down !== undefined) { const i = +down; [clips[i + 1], clips[i]] = [clips[i], clips[i + 1]]; }
+  else if (del !== undefined) { clips.splice(+del, 1); }
+  else return;
+  render();
+});
+
+$("clips").addEventListener("change", e => {
+  const inp = e.target.closest(".sec-in");
+  if (!inp) return;
+  const c = clips[+inp.dataset.i];
+  const max = c.naturalDuration ?? 60;
+  const v = Math.max(0.5, Math.min(max, parseFloat(inp.value) || 0.5));
+  c.seconds = v;
+  c.overridden = true;
+  render();
+});
+
+$("secs").addEventListener("input", e => {
+  const v = parseFloat(e.target.value);
+  $("secs-val").textContent = v.toFixed(1);
+  for (const c of clips) {
+    c.seconds = Math.min(v, c.naturalDuration ?? v);
+    c.overridden = false;
+  }
+  render();
+});
+
+/* ---------- 合併 ---------- */
+function setProgress(label, frac) {
+  $("prog-label").textContent = label;
+  $("prog-pct").textContent = Math.round(frac * 100) + "%";
+  $("bar").style.width = (frac * 100) + "%";
+}
+
+$("go").addEventListener("click", async () => {
+  if (busy || !clips.length) return;
+  busy = true;
+  $("err").hidden = true;
+  $("out-sec").hidden = true;
+  $("prog-sec").hidden = false;
+  $("go").disabled = true;
+  $("pick").disabled = true;
+  if (outUrl) { URL.revokeObjectURL(outUrl); outUrl = null; }
+
+  try {
+    const blob = await merge();
+    outUrl = URL.createObjectURL(blob);
+    $("preview").src = outUrl;
+    $("dl").href = outUrl;
+    $("out-info").textContent = `${totalSeconds().toFixed(1)} 秒 · ${mb(blob.size)}`;
+    $("out-sec").hidden = false;
+    $("prog-sec").hidden = true;
+    outBlob = blob;
+  } catch (e) {
+    $("err").textContent = "合併失敗：" + (e?.message || e);
+    $("err").hidden = false;
+    $("prog-sec").hidden = true;
+  } finally {
+    busy = false;
+    $("go").disabled = false;
+    $("pick").disabled = false;
+  }
+});
+
+async function merge() {
+  const fit = document.querySelector('input[name="fit"]:checked').value;
+  const keepAudio = $("audio").checked;
+  const total = totalSeconds();
+
+  setProgress("檢查編碼器支援", 0);
+  const ok = await canEncodeVideo("avc", { width: OUT_W, height: OUT_H, quality: QUALITY_HIGH });
+  if (!ok) throw new Error("這個瀏覽器不支援 H.264 影片編碼，請改用較新版本的 Safari 或 Chrome");
+
+  const canvas = document.createElement("canvas");
+  canvas.width = OUT_W;
+  canvas.height = OUT_H;
+  const ctx = canvas.getContext("2d", { alpha: false });
+
+  const output = new Output({
+    format: new Mp4OutputFormat({ fastStart: "in-memory" }),
+    target: new BufferTarget(),
+  });
+
+  const vSrc = new VideoSampleSource({
+    codec: "avc",
+    quality: QUALITY_HIGH,
+    keyFrameInterval: 2,
+  });
+  output.addVideoTrack(vSrc, { frameRate: OUT_FPS });
+
+  let aSrc = null;
+  if (keepAudio) {
+    aSrc = new AudioBufferSource({ codec: "aac", quality: QUALITY_MEDIUM });
+    output.addAudioTrack(aSrc);
+  }
+
+  await output.start();
+
+  /* --- 影像：一組編碼器，各片段畫到同一張畫布，時間戳累加 --- */
+  const expectedFrames = Math.max(1, Math.round(total * OUT_FPS));
+  let done = 0;
+  let offset = 0;
+  /* 各片段實際佔用的長度。音訊必須沿用同一組數字，否則兩軌會逐段漂移 */
+  const advances = [];
+
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(c.file) });
+    const track = await input.getPrimaryVideoTrack();
+    if (!track) throw new Error(`${c.name} 沒有影像軌`);
+
+    const sink = new VideoSampleSink(track);
+    let lastEnd = 0;
+
+    for await (const s of sink.samples(0, c.seconds)) {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, OUT_W, OUT_H);
+      /* drawWithFit 預設套用檔案 metadata 裡的旋轉，直式影片會自動轉正 */
+      s.drawWithFit(ctx, { fit });
+
+      const dur = s.duration > 0 ? s.duration : 1 / OUT_FPS;
+      /* 先算完再 close，關掉之後不能再讀 sample 的屬性 */
+      lastEnd = s.timestamp + dur;
+
+      const out = new VideoSample(canvas, {
+        timestamp: offset + s.timestamp,
+        duration: dur,
+      });
+      await vSrc.add(out);
+      out.close();
+      s.close();
+
+      done++;
+      setProgress(`影像 ${i + 1}/${clips.length}`, Math.min(0.98, done / expectedFrames) * (keepAudio ? 0.75 : 1));
+    }
+
+    const advance = lastEnd > 0 ? lastEnd : c.seconds;
+    advances.push(advance);
+    offset += advance;
+  }
+
+  /* --- 音訊：整段時間軸用 OfflineAudioContext 渲染一次 --- */
+  if (aSrc) {
+    setProgress("處理音訊", 0.78);
+    const frames = Math.max(1, Math.ceil(AUDIO_RATE * offset));
+    const oac = new OfflineAudioContext(2, frames, AUDIO_RATE);
+
+    let at = 0;
+    for (let i = 0; i < clips.length; i++) {
+      const c = clips[i];
+      const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(c.file) });
+      const track = await input.getPrimaryAudioTrack();
+      if (track) {
+        const chunks = [];
+        let n = 0, rate = 0, ch = 0;
+        for await (const w of new AudioBufferSink(track).buffers(0, advances[i])) {
+          chunks.push(w.buffer);
+          n += w.buffer.length;
+          rate = w.buffer.sampleRate;
+          ch = Math.max(ch, w.buffer.numberOfChannels);
+        }
+        if (n > 0) {
+          /* 先併成單一 buffer，避免每個封包都建一個節點 */
+          const merged = oac.createBuffer(ch, n, rate);
+          let pos = 0;
+          for (const b of chunks) {
+            for (let k = 0; k < ch; k++) {
+              const src = b.getChannelData(Math.min(k, b.numberOfChannels - 1));
+              merged.getChannelData(k).set(src, pos);
+            }
+            pos += b.length;
+          }
+          const node = oac.createBufferSource();
+          node.buffer = merged;
+          node.connect(oac.destination);
+          node.start(at);
+        }
+      }
+      /* 沒有音軌的片段不放任何節點，那段自然就是靜音 */
+      at += advances[i];
+    }
+
+    const rendered = await oac.startRendering();
+
+    /* 分塊送入編碼器，兼顧記憶體與背壓 */
+    const CHUNK = AUDIO_RATE;
+    for (let p = 0; p < rendered.length; p += CHUNK) {
+      const len = Math.min(CHUNK, rendered.length - p);
+      const piece = oac.createBuffer(2, len, AUDIO_RATE);
+      for (let k = 0; k < 2; k++) {
+        piece.getChannelData(k).set(rendered.getChannelData(k).subarray(p, p + len));
+      }
+      await aSrc.add(piece);
+      setProgress("處理音訊", 0.78 + 0.18 * (p / rendered.length));
+    }
+  }
+
+  setProgress("封裝檔案", 0.97);
+  await output.finalize();
+  setProgress("完成", 1);
+
+  return new Blob([output.target.buffer], { type: "video/mp4" });
+}
+
+/* ---------- 儲存 ---------- */
+$("save").addEventListener("click", async () => {
+  const msg = $("save-msg");
+  const blob = outBlob;
+  if (!blob) return;
+  const name = `merged-${Date.now()}.mp4`;
+  const file = new File([blob], name, { type: "video/mp4" });
+
+  if (navigator.canShare?.({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file] });
+      return;
+    } catch (e) {
+      if (e?.name === "AbortError") return;
+      msg.textContent = "分享失敗，請改用下方的「下載檔案」";
+      msg.hidden = false;
+      return;
+    }
+  }
+  msg.textContent = "這個瀏覽器不支援直接分享，請改用下方的「下載檔案」";
+  msg.hidden = false;
+});
+</script>
+</body>
+</html>
