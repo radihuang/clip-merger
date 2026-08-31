@@ -1,0 +1,746 @@
+<title>拍攝時序探針</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+TC:wght@400;500;600;700&display=swap">
+
+<style>
+:root {
+  --ground:  #ECEEED;
+  --surface: #FFFFFF;
+  --sunk:    #E2E5E4;
+  --ink:     #16191A;
+  --ink-2:   #5A6163;
+  --ink-3:   #868F8C;
+  --line:    #CDD3D2;
+  --line-2:  #E0E4E3;
+  --t1: #0B6E63;
+  --t2: #2C5FA8;
+  --t3: #8A5A00;
+  --t4: #A32A22;
+  --focus: #0B6E63;
+
+  --sans: "IBM Plex Sans TC", "Noto Sans TC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:  #121514;
+    --surface: #1A1E1D;
+    --sunk:    #0D100F;
+    --ink:     #E6EAE8;
+    --ink-2:   #929B98;
+    --ink-3:   #6C7573;
+    --line:    #2E3533;
+    --line-2:  #232928;
+    --t1: #4ECDC0;
+    --t2: #85AEEC;
+    --t3: #DDA43A;
+    --t4: #E8756A;
+    --focus: #4ECDC0;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:  #121514;
+  --surface: #1A1E1D;
+  --sunk:    #0D100F;
+  --ink:     #E6EAE8;
+  --ink-2:   #929B98;
+  --ink-3:   #6C7573;
+  --line:    #2E3533;
+  --line-2:  #232928;
+  --t1: #4ECDC0;
+  --t2: #85AEEC;
+  --t3: #DDA43A;
+  --t4: #E8756A;
+  --focus: #4ECDC0;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 20px 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.masthead { display: flex; flex-direction: column; gap: 10px; }
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+h1 {
+  margin: 0;
+  font-size: 27px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+.lede { margin: 0; color: var(--ink-2); max-width: 60ch; }
+
+.picker {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.btn {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--surface);
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  padding: 13px 20px;
+  cursor: pointer;
+  width: 100%;
+  transition: opacity .15s ease;
+}
+.btn:hover { opacity: .84; }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.ghost {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--line);
+  font-weight: 500;
+  font-size: 14px;
+  padding: 10px 16px;
+  width: auto;
+}
+.btn:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+input[type="file"] { display: none; }
+.hint { font-size: 13px; color: var(--ink-2); margin: 0; }
+
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+.sec-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-family: var(--mono);
+}
+.sec-head .count {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.report { display: flex; flex-direction: column; }
+.row {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  gap: 14px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line-2);
+}
+.row:first-child { border-top: 1px solid var(--line-2); }
+.ord {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  padding-top: 3px;
+}
+.row-body { min-width: 0; display: flex; flex-direction: column; gap: 9px; }
+.fname {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.stamp {
+  font-family: var(--mono);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+.stamp.void { color: var(--t4); font-size: 16px; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  width: fit-content;
+}
+.chip { width: 9px; height: 9px; flex: none; border-radius: 50%; }
+.tier-1 { color: var(--t1); }
+.tier-1 .chip { background: var(--t1); }
+.tier-2 { color: var(--t2); }
+.tier-2 .chip { background: var(--t2); }
+.tier-3 { color: var(--t3); }
+.tier-3 .chip { background: var(--t3); }
+.tier-4 { color: var(--t4); }
+.tier-4 .chip { background: var(--t4); }
+
+.specs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.specs span {
+  padding-right: 10px;
+  margin-right: 10px;
+  border-right: 1px solid var(--line);
+}
+.specs span:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
+.warn { color: var(--t3); font-size: 12.5px; margin: 0; }
+
+details { margin-top: 2px; }
+summary {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  cursor: pointer;
+  width: fit-content;
+}
+.raw {
+  margin-top: 10px;
+  background: var(--sunk);
+  border: 1px solid var(--line-2);
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--ink-2);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.verdict {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+.tally { display: flex; flex-direction: column; }
+.tally-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line-2);
+  font-size: 13.5px;
+}
+.tally-row:last-child { border-bottom: 0; }
+.tally-n { font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.call { margin: 0; font-size: 14.5px; line-height: 1.75; }
+.call strong { font-weight: 600; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.toast { font-size: 13px; color: var(--t1); margin: 0; }
+
+.empty {
+  color: var(--ink-3);
+  font-size: 14px;
+  text-align: center;
+  padding: 40px 0;
+  border: 1px dashed var(--line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+@media (max-width: 480px) {
+  h1 { font-size: 23px; }
+  .wrap { padding: 24px 16px 80px; }
+  .stamp { font-size: 17px; }
+}
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="eyebrow">Clip Merger &middot; P0</div>
+    <h1>拍攝時序探針</h1>
+    <p class="lede">
+      在動手做剪接之前，先確認一件事：你的影片到底讀不讀得到真正的拍攝時間。
+      選幾支影片，這頁會逐一拆開檔頭，告訴你時間是從哪一層取得的、可不可信，以及它們排序後的順序。
+    </p>
+  </header>
+
+  <div class="picker">
+    <button class="btn" id="pick" type="button">選擇影片</button>
+    <input type="file" id="file" accept="video/*,.mov,.mp4,.m4v" multiple>
+    <p class="hint">
+      全程在你的手機上解析，影片不會離開這台裝置，也不會被上傳。
+      只讀取檔頭的中繼資料區段，不讀影像本身，所以幾百 MB 的檔案也是秒開。
+    </p>
+  </div>
+
+  <section id="results" hidden>
+    <div class="sec-head">
+      <h2>依拍攝時間排序</h2>
+      <span class="count" id="count"></span>
+    </div>
+    <div class="report" id="report"></div>
+  </section>
+
+  <section id="verdict-sec" hidden>
+    <div class="sec-head"><h2>診斷結論</h2></div>
+    <div class="verdict">
+      <div class="tally" id="tally"></div>
+      <p class="call" id="call"></p>
+      <div class="actions">
+        <button class="btn ghost" id="copy" type="button">複製診斷報告</button>
+        <button class="btn ghost" id="reset" type="button">重新選擇</button>
+      </div>
+      <p class="toast" id="toast" hidden></p>
+    </div>
+  </section>
+
+  <div class="empty" id="empty">尚未選擇影片</div>
+
+</div>
+
+<script>
+"use strict";
+
+/* 1904-01-01 到 1970-01-01 的秒數，ISO/IEC 14496-12 的時間基準 */
+var MAC_EPOCH = 2082844800;
+
+var TIERS = {
+  1: { label: "QuickTime 原生拍攝時間", note: "含時區，最可信" },
+  2: { label: "MP4 檔頭時間 mvhd", note: "無時區標記，可能有時差" },
+  3: { label: "從檔名推測", note: "非中繼資料，僅供參考" },
+  4: { label: "檔案修改時間", note: "不是拍攝時間，排序不可靠" }
+};
+
+function str4(dv, o) {
+  return String.fromCharCode(dv.getUint8(o), dv.getUint8(o + 1), dv.getUint8(o + 2), dv.getUint8(o + 3));
+}
+function fx16(dv, o) { return dv.getInt32(o) / 65536; }
+
+function boxesIn(dv, start, end) {
+  var out = [], off = start;
+  while (off + 8 <= end) {
+    var size = dv.getUint32(off);
+    var name = str4(dv, off + 4);
+    var head = 8;
+    if (size === 1) {
+      if (off + 16 > end) break;
+      size = Number(dv.getBigUint64(off + 8));
+      head = 16;
+    } else if (size === 0) {
+      size = end - off;
+    }
+    if (size < head || off + size > end) break;
+    out.push({ name: name, body: off + head, end: off + size });
+    off += size;
+  }
+  return out;
+}
+function pick(list, name) {
+  for (var i = 0; i < list.length; i++) if (list[i].name === name) return list[i];
+  return null;
+}
+
+/* moov 可能在檔尾，逐個 top-level box 跳過去找，不整檔載入 */
+async function locateMoov(file) {
+  var off = 0, guard = 0;
+  while (off < file.size && guard++ < 1024) {
+    var buf = await file.slice(off, off + 16).arrayBuffer();
+    if (buf.byteLength < 8) return null;
+    var dv = new DataView(buf);
+    var size = dv.getUint32(0);
+    var name = str4(dv, 4);
+    if (size === 1) {
+      if (buf.byteLength < 16) return null;
+      size = Number(dv.getBigUint64(8));
+    } else if (size === 0) {
+      size = file.size - off;
+    }
+    if (size < 8) return null;
+    if (name === "moov") return { start: off, size: size };
+    off += size;
+  }
+  return null;
+}
+
+function readDataBox(dv, start, end) {
+  var d = pick(boxesIn(dv, start, end), "data");
+  if (!d || d.end - d.body < 8) return null;
+  var type = dv.getUint32(d.body);
+  var bytes = new Uint8Array(dv.buffer, dv.byteOffset + d.body + 8, d.end - d.body - 8);
+  if (type === 1) return new TextDecoder().decode(bytes);
+  if (type === 2) return new TextDecoder("utf-16be").decode(bytes);
+  return "<" + bytes.length + " bytes, type " + type + ">";
+}
+
+/* meta 有兩種排版：QuickTime 版沒有 version/flags，ISO 版有，讀 4 bytes 判斷 */
+function parseMeta(dv, box, tags) {
+  if (box.end - box.body < 4) return;
+  var word = dv.getUint32(box.body);
+  var kids = boxesIn(dv, word !== 0 ? box.body : box.body + 4, box.end);
+
+  var keys = new Map();
+  var keysBox = pick(kids, "keys");
+  if (keysBox) {
+    var p = keysBox.body + 4;
+    var n = dv.getUint32(p); p += 4;
+    for (var i = 0; i < n && p + 8 <= keysBox.end; i++) {
+      var size = dv.getUint32(p);
+      if (size < 8 || p + size > keysBox.end) break;
+      var kb = new Uint8Array(dv.buffer, dv.byteOffset + p + 8, size - 8);
+      keys.set(i + 1, new TextDecoder().decode(kb));
+      p += size;
+    }
+  }
+
+  var ilst = pick(kids, "ilst");
+  if (!ilst) return;
+  var items = boxesIn(dv, ilst.body, ilst.end);
+  for (var j = 0; j < items.length; j++) {
+    var item = items[j];
+    var key = item.name;
+    var asNum = (key.charCodeAt(0) << 24) + (key.charCodeAt(1) << 16) +
+                (key.charCodeAt(2) << 8) + key.charCodeAt(3);
+    if (keys.has(asNum)) key = keys.get(asNum);
+    var val = readDataBox(dv, item.body, item.end);
+    if (val !== null && !(key in tags)) tags[key] = val;
+  }
+}
+
+function parseTrak(dv, trak) {
+  var kids = boxesIn(dv, trak.body, trak.end);
+  var t = { kind: null, codec: null, w: 0, h: 0, cw: 0, ch: 0, rotation: 0, fps: null };
+
+  var tkhd = pick(kids, "tkhd");
+  if (tkhd) {
+    var ver = dv.getUint8(tkhd.body);
+    var p = tkhd.body + 4 + (ver === 1 ? 32 : 20);
+    p += 16; /* reserved x2, layer, alternate_group, volume, reserved */
+    var a = fx16(dv, p), b = fx16(dv, p + 4);
+    p += 36; /* 9 個矩陣值 */
+    t.w = Math.round(fx16(dv, p));
+    t.h = Math.round(fx16(dv, p + 4));
+    var deg = Math.round(Math.atan2(b, a) * 180 / Math.PI);
+    t.rotation = ((deg % 360) + 360) % 360;
+  }
+
+  var mdia = pick(kids, "mdia");
+  if (!mdia) return t;
+  var mk = boxesIn(dv, mdia.body, mdia.end);
+
+  var hdlr = pick(mk, "hdlr");
+  if (hdlr) {
+    var h = str4(dv, hdlr.body + 8);
+    t.kind = h === "vide" ? "video" : h === "soun" ? "audio" : h;
+  }
+
+  var mdScale = 0, mdDur = 0;
+  var mdhd = pick(mk, "mdhd");
+  if (mdhd) {
+    var mver = dv.getUint8(mdhd.body);
+    if (mver === 1) {
+      mdScale = dv.getUint32(mdhd.body + 20);
+      mdDur = Number(dv.getBigUint64(mdhd.body + 24));
+    } else {
+      mdScale = dv.getUint32(mdhd.body + 12);
+      mdDur = dv.getUint32(mdhd.body + 16);
+    }
+  }
+
+  var minf = pick(mk, "minf");
+  var stbl = minf ? pick(boxesIn(dv, minf.body, minf.end), "stbl") : null;
+  if (stbl) {
+    var sk = boxesIn(dv, stbl.body, stbl.end);
+    var stsd = pick(sk, "stsd");
+    if (stsd) {
+      var entry = boxesIn(dv, stsd.body + 8, stsd.end)[0];
+      if (entry) {
+        t.codec = entry.name;
+        /* VisualSampleEntry: reserved(6)+dataRefIdx(2)+preDefined(2)+reserved(2)+preDefined(12) = 24 */
+        if (t.kind === "video" && entry.end - entry.body >= 28) {
+          t.cw = dv.getUint16(entry.body + 24);
+          t.ch = dv.getUint16(entry.body + 26);
+        }
+      }
+    }
+    var stsz = pick(sk, "stsz");
+    if (stsz && mdScale && mdDur) {
+      var count = dv.getUint32(stsz.body + 8);
+      var secs = mdDur / mdScale;
+      if (secs > 0) t.fps = count / secs;
+    }
+  }
+  return t;
+}
+
+function parseMoov(buffer) {
+  var dv = new DataView(buffer);
+  var moov = pick(boxesIn(dv, 0, buffer.byteLength), "moov");
+  if (!moov) return null;
+
+  var kids = boxesIn(dv, moov.body, moov.end);
+  var res = { mvhdDate: null, duration: null, tags: {}, video: null, audio: null };
+
+  var mvhd = pick(kids, "mvhd");
+  if (mvhd) {
+    var ver = dv.getUint8(mvhd.body);
+    var p = mvhd.body + 4, created, scale, d;
+    if (ver === 1) {
+      created = Number(dv.getBigUint64(p)); p += 16;
+      scale = dv.getUint32(p); p += 4;
+      d = Number(dv.getBigUint64(p));
+    } else {
+      created = dv.getUint32(p); p += 8;
+      scale = dv.getUint32(p); p += 4;
+      d = dv.getUint32(p);
+    }
+    if (created > MAC_EPOCH) res.mvhdDate = new Date((created - MAC_EPOCH) * 1000);
+    if (scale > 0 && d > 0) res.duration = d / scale;
+  }
+
+  var meta = pick(kids, "meta");
+  if (meta) parseMeta(dv, meta, res.tags);
+
+  var udta = pick(kids, "udta");
+  if (udta) {
+    var uk = boxesIn(dv, udta.body, udta.end);
+    var um = pick(uk, "meta");
+    if (um) parseMeta(dv, um, res.tags);
+    /* QuickTime udta 也可能直接掛 (c)day：[u16 長度][u16 語言][文字] */
+    for (var i = 0; i < uk.length; i++) {
+      var bx = uk[i];
+      if (bx.name.charCodeAt(0) === 0xA9 && bx.end - bx.body > 4 && !(bx.name in res.tags)) {
+        var len = dv.getUint16(bx.body);
+        if (len > 0 && bx.body + 4 + len <= bx.end) {
+          var tb = new Uint8Array(dv.buffer, dv.byteOffset + bx.body + 4, len);
+          res.tags[bx.name] = new TextDecoder().decode(tb);
+        }
+      }
+    }
+  }
+
+  for (var k = 0; k < kids.length; k++) {
+    if (kids[k].name !== "trak") continue;
+    var t = parseTrak(dv, kids[k]);
+    if (t.kind === "video" && !res.video) res.video = t;
+    else if (t.kind === "audio" && !res.audio) res.audio = t;
+  }
+  return res;
+}
+
+function dateFromName(name) {
+  var m = name.match(/(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})[-_.T ]?(\d{2})[-_.:]?(\d{2})[-_.:]?(\d{2})/);
+  if (!m) return null;
+  var Y = +m[1], Mo = +m[2], D = +m[3], H = +m[4], Mi = +m[5], S = +m[6];
+  if (Mo < 1 || Mo > 12 || D < 1 || D > 31 || H > 23 || Mi > 59 || S > 59) return null;
+  var d = new Date(Y, Mo - 1, D, H, Mi, S);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+async function inspect(file) {
+  var r = { file: file, name: file.name, size: file.size,
+            date: null, tier: 4, tags: {}, meta: null, error: null, rawStamp: null };
+  try {
+    var loc = await locateMoov(file);
+    if (loc) {
+      var buf = await file.slice(loc.start, loc.start + loc.size).arrayBuffer();
+      r.meta = parseMoov(buf);
+      if (r.meta) r.tags = r.meta.tags;
+      else r.error = "moov 檔頭讀到了但解析不出內容";
+    } else {
+      r.error = "找不到 moov 檔頭，可能不是 MP4／MOV 格式";
+    }
+  } catch (e) {
+    r.error = "解析失敗：" + e.message;
+  }
+
+  var qt = r.tags["com.apple.quicktime.creationdate"] || r.tags["©day"] || r.tags["date"];
+  if (qt) {
+    var d1 = new Date(qt);
+    if (!isNaN(d1.getTime())) { r.date = d1; r.tier = 1; r.rawStamp = qt; }
+  }
+  if (!r.date && r.meta && r.meta.mvhdDate) { r.date = r.meta.mvhdDate; r.tier = 2; }
+  if (!r.date) {
+    var d2 = dateFromName(file.name);
+    if (d2) { r.date = d2; r.tier = 3; }
+  }
+  if (!r.date) { r.date = new Date(file.lastModified); r.tier = 4; }
+  return r;
+}
+
+var $ = function (id) { return document.getElementById(id); };
+var pad = function (n) { return String(n).padStart(2, "0"); };
+
+function fmt(d) {
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+         "  " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+}
+function mb(b) { return (b / 1048576).toFixed(1) + " MB"; }
+function durTxt(s) {
+  if (!s) return null;
+  var m = Math.floor(s / 60), sec = Math.round(s % 60);
+  return m > 0 ? m + "分" + pad(sec) + "秒" : s.toFixed(1) + " 秒";
+}
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+  });
+}
+
+var current = [];
+
+function render(rows) {
+  current = rows;
+  $("empty").hidden = true;
+  $("results").hidden = false;
+  $("verdict-sec").hidden = false;
+  $("count").textContent = rows.length + " 支";
+
+  $("report").innerHTML = rows.map(function (r, i) {
+    var t = TIERS[r.tier];
+    var v = r.meta && r.meta.video;
+    var specs = [];
+    if (v) {
+      if (v.codec) specs.push(v.codec);
+      if (v.cw && v.ch) specs.push(v.cw + "×" + v.ch);
+      if (v.fps) specs.push(v.fps.toFixed(1) + " fps");
+      if (v.rotation) specs.push("旋轉 " + v.rotation + "°");
+    }
+    if (r.meta && r.meta.duration) specs.push(durTxt(r.meta.duration));
+    specs.push(mb(r.size));
+    if (r.meta && r.meta.audio && r.meta.audio.codec) specs.push("音訊 " + r.meta.audio.codec);
+
+    var keys = Object.keys(r.tags);
+    var raw = keys.length
+      ? keys.map(function (k) { return k + "\n  " + esc(r.tags[k]); }).join("\n")
+      : "（檔案裡沒有任何中繼資料標籤）";
+
+    return '<div class="row">' +
+      '<div class="ord">' + pad(i + 1) + '</div>' +
+      '<div class="row-body">' +
+        '<div class="fname">' + esc(r.name) + '</div>' +
+        '<div class="stamp' + (r.tier === 4 ? " void" : "") + '">' + fmt(r.date) + '</div>' +
+        '<div class="badge tier-' + r.tier + '"><span class="chip"></span>' + t.label + ' · ' + t.note + '</div>' +
+        (r.error ? '<p class="warn">' + esc(r.error) + '</p>' : "") +
+        '<div class="specs">' + specs.map(function (s) { return "<span>" + esc(s) + "</span>"; }).join("") + '</div>' +
+        '<details><summary>原始中繼資料 (' + keys.length + ')</summary>' +
+        '<div class="raw">' + raw + '</div></details>' +
+      '</div></div>';
+  }).join("");
+
+  var tiers = [1, 2, 3, 4];
+  $("tally").innerHTML = tiers.map(function (n) {
+    var c = rows.filter(function (r) { return r.tier === n; }).length;
+    return '<div class="tally-row">' +
+      '<span class="badge tier-' + n + '"><span class="chip"></span>' + TIERS[n].label + '</span>' +
+      '<span class="tally-n">' + c + '</span></div>';
+  }).join("");
+
+  var all = rows.map(function (r) { return r.tier; });
+  var best = Math.min.apply(null, all);
+  var worst = Math.max.apply(null, all);
+  var call;
+  if (worst === 1) {
+    call = "<strong>全部讀到 QuickTime 原生拍攝時間。</strong>這是最好的結果——排序會完全準確，而且含時區資訊，不需要任何備援機制。可以直接往下做合併功能。";
+  } else if (worst <= 2) {
+    call = "<strong>拍攝時間都讀得到，但有部分來自 MP4 檔頭。</strong>檔頭時間沒有時區標記，顯示出來的時鐘可能跟實際差幾小時；不過同一台裝置的偏移量一致，<strong>排序仍然正確</strong>。";
+  } else if (best <= 2) {
+    call = "<strong>有影片讀不到中繼資料時間，退到了檔名或檔案時間。</strong>混用不同來源排序會不準——這幾支很可能被轉檔過，例如經 App 匯出或壓縮。接下來的介面需要讓你能手動調整順序。";
+  } else {
+    call = "<strong>沒有任何一支讀到中繼資料時間。</strong>拍攝時間已經被洗掉了。請確認選檔時選到的是原始檔，而不是經過轉傳或壓縮的版本；若原始檔就是這樣，排序只能靠手動。";
+  }
+  $("call").innerHTML = call;
+}
+
+function reportText() {
+  var lines = ["拍攝時序探針 — 診斷報告", "共 " + current.length + " 支影片", ""];
+  current.forEach(function (r, i) {
+    var v = r.meta && r.meta.video;
+    lines.push(pad(i + 1) + "  " + r.name);
+    lines.push("    時間 " + fmt(r.date) + "   來源 " + TIERS[r.tier].label);
+    if (r.rawStamp) lines.push("    原始字串 " + r.rawStamp);
+    if (v) lines.push("    " + (v.codec || "?") + "  " + v.cw + "x" + v.ch + "  " +
+                      (v.fps ? v.fps.toFixed(2) + "fps" : "?fps") + "  旋轉" + v.rotation + "°");
+    if (r.meta && r.meta.duration) lines.push("    長度 " + r.meta.duration.toFixed(2) + "s   大小 " + mb(r.size));
+    if (r.meta && r.meta.audio) lines.push("    音訊 " + r.meta.audio.codec);
+    if (r.error) lines.push("    錯誤 " + r.error);
+    lines.push("    標籤 " + (Object.keys(r.tags).join(", ") || "（無）"));
+    lines.push("");
+  });
+  return lines.join("\n");
+}
+
+$("pick").addEventListener("click", function () { $("file").click(); });
+
+$("file").addEventListener("change", async function (e) {
+  var files = Array.prototype.slice.call(e.target.files);
+  if (!files.length) return;
+  $("pick").textContent = "解析中…";
+  $("pick").disabled = true;
+  var rows = [];
+  for (var i = 0; i < files.length; i++) rows.push(await inspect(files[i]));
+  rows.sort(function (a, b) { return a.date - b.date; });
+  render(rows);
+  $("pick").textContent = "選擇影片";
+  $("pick").disabled = false;
+  e.target.value = "";
+});
+
+$("reset").addEventListener("click", function () {
+  current = [];
+  $("results").hidden = true;
+  $("verdict-sec").hidden = true;
+  $("empty").hidden = false;
+  window.scrollTo({ top: 0 });
+});
+
+$("copy").addEventListener("click", async function () {
+  var t = $("toast");
+  try {
+    await navigator.clipboard.writeText(reportText());
+    t.textContent = "已複製到剪貼簿";
+  } catch (err) {
+    t.textContent = "複製失敗，請改用展開的原始中繼資料手動選取";
+  }
+  t.hidden = false;
+  setTimeout(function () { t.hidden = true; }, 2800);
+});
+</script>
