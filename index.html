@@ -155,6 +155,7 @@ input[type="file"] { display: none; }
   font-family: var(--mono); font-size: 11px; color: var(--ink-3);
   font-variant-numeric: tabular-nums;
 }
+.warn { color: var(--t3); font-size: 11.5px; margin: 0; }
 .clip-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .sec-field { display: flex; align-items: center; gap: 4px; }
 .sec-field input {
@@ -185,6 +186,27 @@ input[type="file"] { display: none; }
 }
 input[type="range"] { width: 100%; accent-color: var(--focus); }
 .field-note { font-size: 12px; color: var(--ink-3); margin: 0; }
+
+.select {
+  font-family: var(--sans); font-size: 14px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line);
+  padding: 11px 12px; width: 100%; -webkit-appearance: none; appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-2) 50%),
+                    linear-gradient(135deg, var(--ink-2) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.select.mini-sel {
+  width: auto; font-size: 12px; padding: 5px 26px 5px 8px;
+  background-position: calc(100% - 13px) 50%, calc(100% - 9px) 50%;
+}
+.kind {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em;
+  border: 1px solid var(--line); color: var(--ink-3);
+  padding: 1px 5px; width: fit-content;
+}
 
 .toggle { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
 .toggle input { margin-top: 3px; accent-color: var(--focus); width: 17px; height: 17px; flex: none; }
@@ -254,13 +276,15 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
     <div class="eyebrow">Clip Merger</div>
     <h1>依拍攝時間合併影片</h1>
     <p class="lede">
-      選幾支影片，自動依拍攝時間排好，各取開頭幾秒接成一支。
-      全程在這台裝置上處理，影片不會上傳。
+      選幾支影片和照片，自動依拍攝時間排好，各取幾秒接成一支。
+      照片可以加上平移或縮放，不會只是一張不動的圖。
+      全程在這台裝置上處理，不會上傳。
     </p>
   </header>
 
-  <button class="btn" id="pick" type="button">選擇影片</button>
-  <input type="file" id="file" accept="video/*,.mov,.mp4,.m4v" multiple>
+  <button class="btn" id="pick" type="button">選擇影片或照片</button>
+  <input type="file" id="file" multiple
+         accept="video/*,image/*,.mov,.mp4,.m4v,.jpg,.jpeg,.png,.heic,.heif">
 
   <div class="empty" id="empty">尚未選擇影片</div>
 
@@ -285,6 +309,17 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
         <p class="field-note">拖動會套用到所有片段；上方也可以單獨改某一段。</p>
       </div>
 
+      <div class="field" id="fx-field" hidden>
+        <div class="field-head">
+          <label for="fx">照片動態</label>
+          <span class="field-val" id="fx-count"></span>
+        </div>
+        <select id="fx" class="select"></select>
+        <p class="field-note">
+          套用到所有照片；某張想不一樣，在上方那一列單獨改。影片段落不受影響。
+        </p>
+      </div>
+
       <div class="field">
         <div class="field-head"><label>畫面縮放</label></div>
         <div class="radios">
@@ -302,10 +337,18 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
       </div>
 
       <label class="toggle">
+        <input type="checkbox" id="fade">
+        <span class="toggle-text">
+          <strong>結尾淡出</strong>
+          <span>整支影片的最後一秒漸暗收黑，中間的接點維持硬切。</span>
+        </span>
+      </label>
+
+      <label class="toggle">
         <input type="checkbox" id="audio">
         <span class="toggle-text">
           <strong>保留原音</strong>
-          <span>沒有音軌的片段會自動留白，時間軸不會錯位。開啟會拉長編碼時間。</span>
+          <span>沒有音軌的片段與照片會自動留白，時間軸不會錯位。開啟會拉長編碼時間。</span>
         </span>
       </label>
 
@@ -349,6 +392,7 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
 
 <script type="module">
 import { inspectFile, TIERS } from "./mp4-time.js";
+import { inspectPhoto, PHOTO_TIERS } from "./photo-time.js";
 import {
   Input, BlobSource, ALL_FORMATS,
   Output, Mp4OutputFormat, BufferTarget,
@@ -358,6 +402,19 @@ import {
 } from "./mediabunny.min.mjs";
 
 const OUT_W = 1080, OUT_H = 1920, OUT_FPS = 30, AUDIO_RATE = 48000;
+const FADE_SEC = 1.0;    // 結尾淡出長度
+const ZOOM = 1.18;       // 縮放特效的幅度
+const PAN_ZOOM = 1.35;   // 平移要多一點餘裕，否則 9:16 的照片幾乎沒得移
+const PAN_MAX = OUT_W * 0.25; // 單側平移上限；超寬照片不設限會快得像閃過去
+
+const EFFECTS = {
+  zoomIn:   "緩緩放大",
+  zoomOut:  "緩緩縮小",
+  panLeft:  "向左平移",
+  panRight: "向右平移",
+  none:     "靜止不動",
+};
+let globalEffect = "zoomIn";
 
 const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, "0");
@@ -385,16 +442,31 @@ $("file").addEventListener("change", async e => {
   $("pick").textContent = "讀取中…";
 
   for (const f of files) {
-    const info = await inspectFile(f);
-    const natural = info.meta?.duration ?? null;
-    clips.push({
-      ...info,
-      naturalDuration: natural,
-      seconds: Math.min(3, natural ?? 3),
-      overridden: false,
-      thumb: null,
-      hasAudio: !!info.meta?.audio,
-    });
+    if (isImage(f)) {
+      const info = await inspectPhoto(f);
+      clips.push({
+        ...info,
+        naturalDuration: null,   // 照片沒有原長，秒數完全由使用者決定
+        seconds: 3,
+        overridden: false,
+        effect: null,            // null = 跟隨全域設定
+        thumb: null,
+        hasAudio: false,
+      });
+    } else {
+      const info = await inspectFile(f);
+      const natural = info.meta?.duration ?? null;
+      clips.push({
+        ...info,
+        kind: "video",
+        naturalDuration: natural,
+        seconds: Math.min(3, natural ?? 3),
+        overridden: false,
+        effect: null,
+        thumb: null,
+        hasAudio: !!info.meta?.audio,
+      });
+    }
   }
   clips.sort((a, b) => a.date - b.date);
 
@@ -404,10 +476,38 @@ $("file").addEventListener("change", async e => {
   makeThumbs();
 });
 
+/* 副檔名比 MIME 可靠：iOS 對 HEIC 給的 type 有時是空字串 */
+function isImage(f) {
+  if (f.type.startsWith("image/")) return true;
+  if (f.type.startsWith("video/")) return false;
+  return /\.(jpe?g|png|heic|heif|gif|webp|bmp|tiff?)$/i.test(f.name);
+}
+
+const effectOf = c => c.effect ?? globalEffect;
+
 /* ---------- 縮圖 ---------- */
 async function makeThumbs() {
   for (const c of clips) {
     if (c.thumb || c.error) continue;
+
+    if (c.kind === "photo") {
+      try {
+        const bmp = await createImageBitmap(c.file, { imageOrientation: "from-image" });
+        const cv = document.createElement("canvas");
+        cv.width = 92; cv.height = 164;
+        const cx = cv.getContext("2d");
+        cx.fillStyle = "#000";
+        cx.fillRect(0, 0, cv.width, cv.height);
+        const s = Math.max(cv.width / bmp.width, cv.height / bmp.height);
+        const w = bmp.width * s, h = bmp.height * s;
+        cx.drawImage(bmp, (cv.width - w) / 2, (cv.height - h) / 2, w, h);
+        bmp.close();
+        c.thumb = cv.toDataURL("image/jpeg", 0.7);
+        render();
+      } catch { /* 縮圖失敗不影響合併 */ }
+      continue;
+    }
+
     try {
       const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(c.file) });
       const track = await input.getPrimaryVideoTrack();
@@ -433,18 +533,36 @@ function render() {
   $("ctrl-sec").hidden = !has;
   if (!has) return;
 
-  $("count").textContent = clips.length + " 段";
+  const photos = clips.filter(c => c.kind === "photo").length;
+  const videos = clips.length - photos;
+  $("count").textContent =
+    [videos ? `影片 ${videos}` : null, photos ? `照片 ${photos}` : null]
+      .filter(Boolean).join(" · ");
   $("total").textContent = totalSeconds().toFixed(1) + " 秒";
 
+  $("fx-field").hidden = photos === 0;
+  $("fx-count").textContent = photos ? `${photos} 張` : "";
+
   $("clips").innerHTML = clips.map((c, i) => {
-    const t = TIERS[c.tier];
+    const photo = c.kind === "photo";
+    const t = (photo ? PHOTO_TIERS : TIERS)[c.tier] ?? TIERS[4];
     const v = c.meta?.video;
-    const spec = [
-      v?.cw ? `${v.cw}×${v.ch}` : null,
-      c.naturalDuration ? `原長 ${c.naturalDuration.toFixed(0)}s` : null,
-      mb(c.size),
-      c.hasAudio ? null : "無音軌",
-    ].filter(Boolean).join("  ·  ");
+    const spec = photo
+      ? [c.width ? `${c.width}×${c.height}` : null, mb(c.size)].filter(Boolean).join("  ·  ")
+      : [
+          v?.cw ? `${v.cw}×${v.ch}` : null,
+          c.naturalDuration ? `原長 ${c.naturalDuration.toFixed(0)}s` : null,
+          mb(c.size),
+          c.hasAudio ? null : "無音軌",
+        ].filter(Boolean).join("  ·  ");
+
+    const fxSel = photo
+      ? `<select class="select mini-sel fx-in" data-i="${i}" aria-label="這張照片的動態">
+           ${Object.entries(EFFECTS).map(([k, label]) =>
+             `<option value="${k}"${effectOf(c) === k ? " selected" : ""}>${label}</option>`
+           ).join("")}
+         </select>`
+      : "";
 
     return `
       <div class="clip">
@@ -452,10 +570,12 @@ function render() {
           ? `<img class="thumb" src="${c.thumb}" alt="">`
           : `<div class="thumb-ph">${c.error ? "!" : "…"}</div>`}
         <div class="clip-body">
+          <div class="kind">${photo ? "照片" : "影片"}</div>
           <div class="clip-name">${esc(c.name)}</div>
           <div class="clip-time">${fmtTime(c.date)}</div>
           <div class="badge tier-${c.tier}"><span class="chip"></span>${t.label}</div>
           <div class="clip-spec">${spec}</div>
+          ${c.error ? `<p class="warn">${esc(c.error)}</p>` : ""}
         </div>
         <div class="clip-side">
           <div class="sec-field">
@@ -464,6 +584,7 @@ function render() {
             <span class="unit">秒</span>
           </div>
           ${c.overridden ? '<span class="edited">已微調</span>' : ""}
+          ${fxSel}
           <div class="moves">
             <button class="mini" data-up="${i}" ${i === 0 ? "disabled" : ""} aria-label="上移">↑</button>
             <button class="mini" data-down="${i}" ${i === clips.length - 1 ? "disabled" : ""} aria-label="下移">↓</button>
@@ -487,12 +608,30 @@ $("clips").addEventListener("click", e => {
 
 $("clips").addEventListener("change", e => {
   const inp = e.target.closest(".sec-in");
-  if (!inp) return;
-  const c = clips[+inp.dataset.i];
-  const max = c.naturalDuration ?? 60;
-  const v = Math.max(0.5, Math.min(max, parseFloat(inp.value) || 0.5));
-  c.seconds = v;
-  c.overridden = true;
+  if (inp) {
+    const c = clips[+inp.dataset.i];
+    const max = c.naturalDuration ?? 60;
+    c.seconds = Math.max(0.5, Math.min(max, parseFloat(inp.value) || 0.5));
+    c.overridden = true;
+    render();
+    return;
+  }
+  const sel = e.target.closest(".fx-in");
+  if (sel) {
+    clips[+sel.dataset.i].effect = sel.value;
+    render();
+  }
+});
+
+/* 全域動態選單 */
+$("fx").innerHTML = Object.entries(EFFECTS)
+  .map(([k, label]) => `<option value="${k}"${k === globalEffect ? " selected" : ""}>${label}</option>`)
+  .join("");
+
+$("fx").addEventListener("change", e => {
+  globalEffect = e.target.value;
+  /* 全域設定要能蓋掉先前的個別調整，否則改了看起來沒反應 */
+  for (const c of clips) if (c.kind === "photo") c.effect = null;
   render();
 });
 
@@ -505,6 +644,46 @@ $("secs").addEventListener("input", e => {
   }
   render();
 });
+
+/* ---------- 照片動態 ----------
+   先算 cover 縮放讓圖填滿畫布，再乘上 ZOOM 換取可移動的餘裕。
+   t 是這一格在該片段內的進度，0 到 1。 */
+function drawPhoto(ctx, bmp, effect, t) {
+  const pan = effect === "panLeft" || effect === "panRight";
+  const base = Math.max(OUT_W / bmp.width, OUT_H / bmp.height);
+
+  let scale = base;
+  if (effect === "zoomIn") scale = base * (1 + (ZOOM - 1) * t);
+  else if (effect === "zoomOut") scale = base * (ZOOM - (ZOOM - 1) * t);
+  else if (pan) scale = base * PAN_ZOOM;
+
+  const w = bmp.width * scale;
+  const h = bmp.height * scale;
+  const cx = (OUT_W - w) / 2;   // 置中位置
+  let dx = cx;
+
+  /* 以置中為基準往兩側各掃 range，範圍同時受可用餘裕與速度上限約束 */
+  if (pan) {
+    const range = Math.min((w - OUT_W) / 2, PAN_MAX);
+    if (range > 0) {
+      const dir = effect === "panLeft" ? 1 : -1;
+      dx = cx + dir * range * (1 - 2 * t);
+    }
+  }
+  ctx.drawImage(bmp, dx, (OUT_H - h) / 2, w, h);
+}
+
+/* 只在最後一個片段的尾端收黑，用片段內的相對時間算，
+   不必仰賴整支影片的預估總長 */
+function applyFade(ctx, active, localT, clipDur) {
+  if (!active) return;
+  const span = Math.min(FADE_SEC, clipDur);
+  const start = clipDur - span;
+  if (localT <= start) return;
+  const a = Math.min(1, (localT - start) / span);
+  ctx.fillStyle = `rgba(0,0,0,${a})`;
+  ctx.fillRect(0, 0, OUT_W, OUT_H);
+}
 
 /* ---------- 合併 ---------- */
 function setProgress(label, frac) {
@@ -546,6 +725,7 @@ $("go").addEventListener("click", async () => {
 async function merge() {
   const fit = document.querySelector('input[name="fit"]:checked').value;
   const keepAudio = $("audio").checked;
+  const fadeOut = $("fade").checked;
   const total = totalSeconds();
 
   setProgress("檢查編碼器支援", 0);
@@ -586,6 +766,47 @@ async function merge() {
 
   for (let i = 0; i < clips.length; i++) {
     const c = clips[i];
+    const isLast = i === clips.length - 1;
+    const label = `${c.kind === "photo" ? "照片" : "影像"} ${i + 1}/${clips.length}`;
+    const bump = () => {
+      done++;
+      setProgress(label, Math.min(0.98, done / expectedFrames) * (keepAudio ? 0.75 : 1));
+    };
+
+    if (c.kind === "photo") {
+      let bmp;
+      try {
+        bmp = await createImageBitmap(c.file, { imageOrientation: "from-image" });
+      } catch {
+        throw new Error(`無法解碼 ${c.name}——若是 HEIC，請改用 Safari，或在 iPhone 的「設定 → 相機 → 格式」改為「相容性最佳」`);
+      }
+
+      const effect = effectOf(c);
+      const frames = Math.max(1, Math.round(c.seconds * OUT_FPS));
+      for (let f = 0; f < frames; f++) {
+        const localT = f / OUT_FPS;
+        const t = frames === 1 ? 0 : f / (frames - 1);
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, OUT_W, OUT_H);
+        drawPhoto(ctx, bmp, effect, t);
+        applyFade(ctx, isLast && fadeOut, localT, c.seconds);
+
+        const out = new VideoSample(canvas, {
+          timestamp: offset + localT,
+          duration: 1 / OUT_FPS,
+        });
+        await vSrc.add(out);
+        out.close();
+        bump();
+      }
+      bmp.close();
+
+      const advance = frames / OUT_FPS;
+      advances.push(advance);
+      offset += advance;
+      continue;
+    }
+
     const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(c.file) });
     const track = await input.getPrimaryVideoTrack();
     if (!track) throw new Error(`${c.name} 沒有影像軌`);
@@ -602,6 +823,7 @@ async function merge() {
       const dur = s.duration > 0 ? s.duration : 1 / OUT_FPS;
       /* 先算完再 close，關掉之後不能再讀 sample 的屬性 */
       lastEnd = s.timestamp + dur;
+      applyFade(ctx, isLast && fadeOut, s.timestamp, c.seconds);
 
       const out = new VideoSample(canvas, {
         timestamp: offset + s.timestamp,
@@ -610,9 +832,7 @@ async function merge() {
       await vSrc.add(out);
       out.close();
       s.close();
-
-      done++;
-      setProgress(`影像 ${i + 1}/${clips.length}`, Math.min(0.98, done / expectedFrames) * (keepAudio ? 0.75 : 1));
+      bump();
     }
 
     const advance = lastEnd > 0 ? lastEnd : c.seconds;
@@ -626,9 +846,21 @@ async function merge() {
     const frames = Math.max(1, Math.ceil(AUDIO_RATE * offset));
     const oac = new OfflineAudioContext(2, frames, AUDIO_RATE);
 
+    /* 所有片段接到同一個 gain，結尾才有辦法一起收掉 */
+    const master = oac.createGain();
+    master.connect(oac.destination);
+    if (fadeOut) {
+      const span = Math.min(FADE_SEC, offset);
+      master.gain.setValueAtTime(1, Math.max(0, offset - span));
+      master.gain.linearRampToValueAtTime(0, offset);
+    }
+
     let at = 0;
     for (let i = 0; i < clips.length; i++) {
       const c = clips[i];
+      /* 照片沒有音軌，交給 mediabunny 開會直接丟例外 */
+      if (c.kind === "photo") { at += advances[i]; continue; }
+
       const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(c.file) });
       const track = await input.getPrimaryAudioTrack();
       if (track) {
@@ -653,7 +885,7 @@ async function merge() {
           }
           const node = oac.createBufferSource();
           node.buffer = merged;
-          node.connect(oac.destination);
+          node.connect(master);
           node.start(at);
         }
       }
