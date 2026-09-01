@@ -224,10 +224,20 @@ input[type="range"] { width: 100%; accent-color: var(--focus); }
 .radios strong { font-size: 13px; font-weight: 500; }
 .radios span { font-size: 11.5px; color: var(--ink-3); }
 
+.summary {
+  display: flex; flex-direction: column; gap: 2px;
+  border-top: 1px solid var(--line-2); padding-top: 10px;
+}
 .summary-line {
   display: flex; justify-content: space-between; align-items: baseline;
-  padding-top: 4px; border-top: 1px solid var(--line-2); font-size: 13px;
+  font-size: 13px; gap: 12px;
 }
+.size-note {
+  margin: 6px 0 0; font-size: 12px; line-height: 1.6;
+  padding-left: 10px; border-left: 2px solid currentColor;
+}
+.size-note.lv-warn { color: var(--t3); }
+.size-note.lv-bad  { color: var(--t4); }
 .summary-line .big {
   font-family: var(--mono); font-size: 17px; font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -352,9 +362,16 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
         </span>
       </label>
 
-      <div class="summary-line">
-        <span>輸出 1080×1920 直式 · 30 fps · H.264</span>
-        <span class="big" id="total">0.0 秒</span>
+      <div class="summary">
+        <div class="summary-line">
+          <span>輸出 1080×1920 直式 · 30 fps · H.264</span>
+          <span class="big" id="total">0.0 秒</span>
+        </div>
+        <div class="summary-line">
+          <span>預估檔案大小</span>
+          <span class="big" id="size">0 MB</span>
+        </div>
+        <p class="size-note" id="size-note" hidden></p>
       </div>
 
       <button class="btn" id="go" type="button">合併影片</button>
@@ -526,6 +543,55 @@ function totalSeconds() {
   return clips.reduce((a, c) => a + c.seconds, 0);
 }
 
+/* ---------- 檔案大小預估 ----------
+   位元率公式抄自 mediabunny v1.55.4 encode.ts 的 qualityToBitrateFactor
+   與 computeVideoBitrate；函式庫沒有把這個計算公開出來，
+   升級版本時要回頭核對這裡有沒有跟著變。
+   H.264 是可變位元率，實際輸出會依畫面複雜度上下浮動，這裡只是目標值。 */
+const bitrateFactor = q => 0.3 * Math.exp(2.5538 * q);
+
+function videoBitrate() {
+  const base = 3_000_000 * Math.pow((OUT_W * OUT_H) / (1920 * 1080), 0.95);
+  return Math.ceil(base * bitrateFactor(0.75) / 1000) * 1000; // avc 效率係數為 1.0
+}
+
+function audioBitrate() {
+  const raw = 128_000 * bitrateFactor(0.5);
+  /* AAC 只吃特定幾檔位元率，取最接近的 */
+  return [96_000, 128_000, 160_000, 192_000]
+    .reduce((p, c) => Math.abs(c - raw) < Math.abs(p - raw) ? c : p);
+}
+
+function estimateBytes() {
+  let bps = videoBitrate();
+  if ($("audio").checked) bps += audioBitrate();
+  return totalSeconds() * bps / 8;
+}
+
+const SIZE_WARN = 100 * 1048576;
+const SIZE_ALERT = 250 * 1048576;
+
+function updateSize() {
+  const bytes = estimateBytes();
+  const m = bytes / 1048576;
+  $("size").textContent = m < 1 ? "< 1 MB" : m.toFixed(0) + " MB";
+
+  const note = $("size-note");
+  if (bytes > SIZE_ALERT) {
+    note.className = "size-note lv-bad";
+    note.textContent = "這個大小很可能存不進相簿，也可能讓分頁被系統中止。"
+      + "建議把每段秒數調小；真的需要這麼長，合併後改用「存到「檔案」App」。";
+    note.hidden = false;
+  } else if (bytes > SIZE_WARN) {
+    note.className = "size-note lv-warn";
+    note.textContent = "檔案偏大，「儲存到相簿」有機會被 iOS 中止。"
+      + "失敗的話改用「存到「檔案」App」就能繞過。";
+    note.hidden = false;
+  } else {
+    note.hidden = true;
+  }
+}
+
 function render() {
   const has = clips.length > 0;
   $("empty").hidden = has;
@@ -542,6 +608,7 @@ function render() {
 
   $("fx-field").hidden = photos === 0;
   $("fx-count").textContent = photos ? `${photos} 張` : "";
+  updateSize();
 
   $("clips").innerHTML = clips.map((c, i) => {
     const photo = c.kind === "photo";
@@ -627,6 +694,8 @@ $("clips").addEventListener("change", e => {
 $("fx").innerHTML = Object.entries(EFFECTS)
   .map(([k, label]) => `<option value="${k}"${k === globalEffect ? " selected" : ""}>${label}</option>`)
   .join("");
+
+$("audio").addEventListener("change", updateSize);
 
 $("fx").addEventListener("change", e => {
   globalEffect = e.target.value;
