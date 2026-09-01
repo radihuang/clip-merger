@@ -223,6 +223,15 @@ input[type="range"] { width: 100%; accent-color: var(--focus); }
 video { width: 100%; background: #000; display: block; border: 1px solid var(--line); }
 .err { color: var(--t4); font-size: 13.5px; margin: 0; }
 .ok { color: var(--t1); font-size: 13px; margin: 0; }
+.msg { font-size: 13px; margin: 0; line-height: 1.65; }
+.msg.good { color: var(--t1); }
+.msg.bad  { color: var(--t4); }
+.msg.info { color: var(--ink-2); }
+.msg code {
+  font-family: var(--mono); font-size: 12px;
+  background: var(--sunk); padding: 1px 4px;
+}
+.btn.block { width: 100%; text-align: center; text-decoration: none; }
 
 .empty {
   color: var(--ink-3); font-size: 14px; text-align: center;
@@ -326,8 +335,13 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
     <div class="card">
       <video id="preview" controls playsinline></video>
       <button class="btn" id="save" type="button">儲存到相簿</button>
-      <a class="btn ghost" id="dl" download="merged.mp4" style="width:100%;text-align:center;text-decoration:none">下載檔案</a>
-      <p class="ok" id="save-msg" hidden></p>
+      <p class="msg" id="save-msg" hidden></p>
+      <a class="btn ghost block" id="dl" download="merged.mp4">存到「檔案」App</a>
+      <p class="field-note">
+        「儲存到相簿」會叫出系統分享面板，要在面板裡再選一次「儲存影片」才會真的存進去。
+        面板沒出現或找不到那個選項時，改用上面第二個按鈕存到「檔案」App，
+        再從檔案 App 長按檔案移到相簿。
+      </p>
     </div>
   </section>
 
@@ -350,6 +364,9 @@ const pad = n => String(n).padStart(2, "0");
 const fmtTime = d =>
   `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 const mb = b => (b / 1048576).toFixed(0) + " MB";
+/* 檔名由使用者的檔案帶進來，插進 innerHTML 前一律跳脫 */
+const esc = s => String(s).replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 let clips = [];
 let busy = false;
@@ -435,7 +452,7 @@ function render() {
           ? `<img class="thumb" src="${c.thumb}" alt="">`
           : `<div class="thumb-ph">${c.error ? "!" : "…"}</div>`}
         <div class="clip-body">
-          <div class="clip-name">${c.name}</div>
+          <div class="clip-name">${esc(c.name)}</div>
           <div class="clip-time">${fmtTime(c.date)}</div>
           <div class="badge tier-${c.tier}"><span class="chip"></span>${t.label}</div>
           <div class="clip-spec">${spec}</div>
@@ -667,26 +684,56 @@ async function merge() {
 }
 
 /* ---------- 儲存 ---------- */
-$("save").addEventListener("click", async () => {
+function say(html, kind) {
   const msg = $("save-msg");
-  const blob = outBlob;
-  if (!blob) return;
-  const name = `merged-${Date.now()}.mp4`;
-  const file = new File([blob], name, { type: "video/mp4" });
+  msg.className = "msg " + kind;
+  msg.innerHTML = html;
+  msg.hidden = false;
+}
 
-  if (navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file] });
-      return;
-    } catch (e) {
-      if (e?.name === "AbortError") return;
-      msg.textContent = "分享失敗，請改用下方的「下載檔案」";
-      msg.hidden = false;
-      return;
+$("save").addEventListener("click", async () => {
+  const blob = outBlob;
+  if (!blob) { say("還沒有可儲存的影片，請先合併。", "bad"); return; }
+
+  const size = (blob.size / 1048576).toFixed(1);
+  const file = new File([blob], `merged-${Date.now()}.mp4`, { type: "video/mp4" });
+
+  if (typeof navigator.share !== "function") {
+    say(`這個瀏覽器沒有分享功能（<code>navigator.share</code> 不存在）。
+         請改用下面的「存到『檔案』App」。`, "bad");
+    return;
+  }
+
+  /* canShare 對過大的檔案會回 false，這裡把大小一起講出來才能判斷是不是踩到限制 */
+  if (typeof navigator.canShare === "function" && !navigator.canShare({ files: [file] })) {
+    say(`系統不接受分享這個檔案（${size} MB）。檔案太大是最常見的原因——
+         把每段秒數調小再合併一次試試，或改用下面的「存到『檔案』App」。`, "bad");
+    return;
+  }
+
+  try {
+    /* share 之前不能有 await，否則會失去使用者手勢授權 */
+    await navigator.share({ files: [file] });
+    say("分享面板已送出。若剛才沒有選「儲存影片」，影片不會進到相簿。", "good");
+  } catch (e) {
+    const n = e?.name || "Error";
+    if (n === "AbortError") {
+      say(`分享被取消了（<code>AbortError</code>，${size} MB）。
+           如果你並沒有按取消，就是 iOS 自己中止的——通常是檔案太大。
+           請改用下面的「存到『檔案』App」。`, "bad");
+    } else if (n === "NotAllowedError") {
+      say(`系統拒絕了分享（<code>NotAllowedError</code>）。
+           請重新按一次按鈕；若仍失敗，改用下面的「存到『檔案』App」。`, "bad");
+    } else {
+      say(`分享失敗：<code>${esc(n)}</code>${e?.message ? " — " + esc(e.message) : ""}（${size} MB）。
+           請改用下面的「存到『檔案』App」。`, "bad");
     }
   }
-  msg.textContent = "這個瀏覽器不支援直接分享，請改用下方的「下載檔案」";
-  msg.hidden = false;
+});
+
+/* 存檔路徑在 iOS 上會落到「檔案」App，說清楚免得以為壞了 */
+$("dl").addEventListener("click", () => {
+  say("已送到「檔案」App 的下載項目。要進相簿的話，在檔案 App 裡長按該檔案選「儲存影片」。", "info");
 });
 </script>
 </body>
