@@ -269,6 +269,27 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
   color: var(--ink-3); font-size: 14px; text-align: center;
   padding: 36px 0; border: 1px dashed var(--line);
 }
+
+/* 合併紀錄 */
+.hist-bar { display: flex; justify-content: flex-end; }
+.hist-entry {
+  display: grid; grid-template-columns: 1fr auto; gap: 8px 12px;
+  padding: 14px 0; border-bottom: 1px solid var(--line-2);
+}
+.hist-entry:first-child { border-top: 1px solid var(--line-2); }
+.hist-when { font-family: var(--mono); font-size: 13px; }
+.hist-stat { font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); margin-top: 3px; }
+.hist-strip { grid-column: 1 / -1; display: flex; gap: 3px; overflow-x: auto; }
+.hist-strip img, .hist-strip .ph {
+  width: 34px; height: 60px; flex: none; background: var(--sunk); object-fit: cover;
+}
+.hist-set { grid-column: 1 / -1; font-size: 12px; color: var(--ink-3); }
+.hist-names { grid-column: 1 / -1; }
+.hist-names summary { font-size: 12px; color: var(--ink-3); cursor: pointer; }
+.hist-names ol { margin: 8px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.hist-names li { font-size: 12px; color: var(--ink-2); word-break: break-all; }
+.hist-names .n-meta { font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 @media (max-width: 420px) {
   h1 { font-size: 22px; }
@@ -291,6 +312,12 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
       全程在這台裝置上處理，不會上傳。
     </p>
   </header>
+
+  <div class="hist-bar">
+    <button class="btn ghost" id="hist-open" type="button">做過的紀錄</button>
+  </div>
+
+  <div id="main-view">
 
   <button class="btn" id="pick" type="button">選擇影片或照片</button>
   <input type="file" id="file" multiple
@@ -396,6 +423,7 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
       <video id="preview" controls playsinline></video>
       <button class="btn" id="save" type="button">儲存到相簿</button>
       <p class="msg" id="save-msg" hidden></p>
+      <p class="msg bad" id="hist-save-msg" hidden></p>
       <a class="btn ghost block" id="dl" download="merged.mp4">存到「檔案」App</a>
       <p class="field-note">
         「儲存到相簿」會叫出系統分享面板，要在面板裡再選一次「儲存影片」才會真的存進去。
@@ -405,11 +433,42 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
     </div>
   </section>
 
+  </div><!-- /main-view -->
+
+  <section id="hist-sec" hidden>
+    <div class="sec-head">
+      <h2>做過的紀錄</h2>
+      <span class="count" id="hist-count"></span>
+    </div>
+
+    <p class="field-note">
+      這裡只記錄「做過什麼」——合併時間、片段清單、秒數與特效設定，以及每段的縮圖。
+      成品影片本身不留在這裡：它在你按「儲存到相簿」時就交給系統了，要看成品請去相簿。
+      紀錄只存在這台裝置上，不會上傳。
+    </p>
+
+    <p class="msg bad" id="hist-err" hidden></p>
+    <div class="empty" id="hist-empty" hidden>還沒有任何紀錄</div>
+    <div id="hist-list"></div>
+
+    <button class="btn ghost block" id="hist-back" type="button">回到合併</button>
+    <button class="btn ghost block" id="hist-clear" type="button">清除全部紀錄</button>
+
+    <p class="field-note">
+      iOS 會在這個網站連續七天沒被開啟時，把它存的資料整包清掉——這是系統行為，不是這裡的設定。
+      把頁面加到主畫面並偶爾打開，被清掉的機會比較低。
+    </p>
+  </section>
+
 </div>
 
 <script type="module">
 import { inspectFile, TIERS } from "./mp4-time.js";
 import { inspectPhoto, PHOTO_TIERS } from "./photo-time.js";
+import {
+  addRecord, listRecords, deleteRecord, clearAll, countRecords,
+  buildRecord, requestPersist,
+} from "./history.js";
 import {
   Input, BlobSource, ALL_FORMATS,
   Output, Mp4OutputFormat, BufferTarget,
@@ -780,6 +839,7 @@ $("go").addEventListener("click", async () => {
     $("out-sec").hidden = false;
     $("prog-sec").hidden = true;
     outBlob = blob;
+    saveHistory(blob);
   } catch (e) {
     $("err").textContent = "合併失敗：" + (e?.message || e);
     $("err").hidden = false;
@@ -1036,6 +1096,161 @@ $("save").addEventListener("click", async () => {
 $("dl").addEventListener("click", () => {
   say("已送到「檔案」App 的下載項目。要進相簿的話，在檔案 App 裡長按該檔案選「儲存影片」。", "info");
 });
+
+/* ---------- 合併紀錄 ---------- */
+
+const FIT_LABEL = { contain: "完整不裁切", cover: "填滿裁切" };
+
+/* 存紀錄失敗不該影響已經合併好的影片，但也不能靜默——把原因講在「完成」區塊裡 */
+async function saveHistory(blob) {
+  try {
+    const rec = buildRecord({
+      clips,
+      settings: {
+        perClipSeconds: parseFloat($("secs").value),
+        fit: document.querySelector('input[name="fit"]:checked').value,
+        keepAudio: $("audio").checked,
+        fadeOut: $("fade").checked,
+        globalEffect,
+      },
+      outBytes: blob.size,
+      outSeconds: totalSeconds(),
+      outW: OUT_W,
+      outH: OUT_H,
+    });
+    await addRecord(rec);
+    $("hist-save-msg").hidden = true;
+    await refreshHistCount();
+  } catch (e) {
+    const el = $("hist-save-msg");
+    el.textContent = "這次沒能寫進紀錄：" + (e?.message || e) +
+                     "（影片本身不受影響，仍可儲存到相簿）";
+    el.hidden = false;
+  }
+}
+
+async function refreshHistCount() {
+  try {
+    const n = await countRecords();
+    $("hist-open").textContent = n ? `做過的紀錄 ${n}` : "做過的紀錄";
+  } catch {
+    /* 數不出來就維持原本的字，開啟紀錄頁時才會顯示真正的錯誤 */
+  }
+}
+
+function histRow(r) {
+  const strip = r.clips
+    .map(c => c.thumb ? `<img src="${esc(c.thumb)}" alt="">` : `<span class="ph"></span>`)
+    .join("");
+
+  const photos = r.clips.filter(c => c.kind === "photo").length;
+  const s = r.settings || {};
+  const set = [
+    s.perClipSeconds != null ? `每段 ${s.perClipSeconds} 秒` : null,
+    FIT_LABEL[s.fit] || null,
+    s.keepAudio ? "保留原音" : "靜音",
+    s.fadeOut ? "結尾淡出" : null,
+    photos ? `照片動態 ${EFFECTS[s.globalEffect] || s.globalEffect}` : null,
+  ].filter(Boolean).join("  ·  ");
+
+  const names = r.clips.map((c, i) => {
+    const tiers = c.kind === "photo" ? PHOTO_TIERS : TIERS;
+    const t = tiers[c.tier] ?? TIERS[4];
+    const meta = [
+      c.date ? fmtTime(new Date(c.date)) : "無時間",
+      t.label,
+      `${c.seconds} 秒`,
+      c.kind === "photo" && c.effect ? (EFFECTS[c.effect] || c.effect) : null,
+      c.kind === "video" && !c.hasAudio ? "無音軌" : null,
+    ].filter(Boolean).join("  ·  ");
+    return `<li>${i + 1}. ${esc(c.name)}<br><span class="n-meta">${esc(meta)}</span></li>`;
+  }).join("");
+
+  return `
+    <div class="hist-entry">
+      <div>
+        <div class="hist-when">${esc(fmtTime(new Date(r.at)))}</div>
+        <div class="hist-stat">${r.clips.length} 段  ·  ${r.outSeconds.toFixed(1)} 秒  ·  ${mb(r.outBytes)}</div>
+      </div>
+      <div><button class="mini danger" type="button" data-del="${r.id}">刪除</button></div>
+      <div class="hist-strip">${strip}</div>
+      <div class="hist-set">${esc(set)}</div>
+      <details class="hist-names">
+        <summary>片段明細</summary>
+        <ol>${names}</ol>
+      </details>
+    </div>`;
+}
+
+async function renderHistory() {
+  const err = $("hist-err");
+  try {
+    const rows = await listRecords();
+    err.hidden = true;
+    $("hist-count").textContent = rows.length ? `${rows.length} 次` : "";
+    $("hist-empty").hidden = rows.length > 0;
+    $("hist-list").innerHTML = rows.map(histRow).join("");
+  } catch (e) {
+    $("hist-list").innerHTML = "";
+    $("hist-empty").hidden = true;
+    $("hist-count").textContent = "";
+    err.textContent = "讀不到紀錄：" + (e?.message || e) +
+                      "。無痕模式或關閉了網站資料時會這樣，合併功能本身不受影響。";
+    err.hidden = false;
+  }
+}
+
+function showHistory(on) {
+  $("main-view").hidden = on;
+  $("hist-sec").hidden = !on;
+  if (on) renderHistory();
+  else resetClear();
+  window.scrollTo(0, 0);
+}
+
+$("hist-open").addEventListener("click", () => showHistory(true));
+$("hist-back").addEventListener("click", () => showHistory(false));
+
+$("hist-list").addEventListener("click", async e => {
+  const btn = e.target.closest("[data-del]");
+  if (!btn) return;
+  try {
+    await deleteRecord(Number(btn.dataset.del));
+    await renderHistory();
+    await refreshHistCount();
+  } catch (err) {
+    $("hist-err").textContent = "刪不掉這筆：" + (err?.message || err);
+    $("hist-err").hidden = false;
+  }
+});
+
+/* 兩段式確認，不用 confirm() —— 系統對話框會擋住整個頁面 */
+let clearArmed = false;
+function resetClear() {
+  clearArmed = false;
+  $("hist-clear").textContent = "清除全部紀錄";
+}
+$("hist-clear").addEventListener("click", async () => {
+  if (!clearArmed) {
+    clearArmed = true;
+    $("hist-clear").textContent = "確定要全部清除？再按一次";
+    return;
+  }
+  try {
+    await clearAll();
+    resetClear();
+    await renderHistory();
+    await refreshHistCount();
+  } catch (e) {
+    resetClear();
+    $("hist-err").textContent = "清除失敗：" + (e?.message || e);
+    $("hist-err").hidden = false;
+  }
+});
+
+requestPersist();
+refreshHistCount();
+
 </script>
 </body>
 </html>
