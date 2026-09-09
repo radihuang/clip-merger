@@ -2,7 +2,7 @@
  * history.js — 合併紀錄的儲存層（IndexedDB）
  *
  * 只存「做過什麼」的中繼資料與縮圖，不存成品影片：
- * 每筆約 20–50 KB，就算被 iOS 清掉損失也小。
+ * 實測一筆四段的紀錄約 7 KB（縮圖每張約 2 KB），就算被 iOS 清掉損失也小。
  *
  * iOS 的清除政策（2026-09-08 查證 WebKit 官方說明）：某個來源連續 7 天
  * 沒有使用者互動，它的 script 建立的資料會被整包刪除，不是刪一部分。
@@ -75,6 +75,16 @@ export async function requestPersist() {
   try {
     if (await navigator.storage.persisted()) return true;
     return await navigator.storage.persist();
+  } catch {
+    return null;
+  }
+}
+
+/* 只查詢目前狀態，不發出申請。回傳 true／false；瀏覽器沒有這個介面時回 null。 */
+export async function persistStatus() {
+  if (!navigator.storage?.persisted) return null;
+  try {
+    return await navigator.storage.persisted();
   } catch {
     return null;
   }

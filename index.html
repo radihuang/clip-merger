@@ -454,6 +454,7 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
     <button class="btn ghost block" id="hist-back" type="button">回到合併</button>
     <button class="btn ghost block" id="hist-clear" type="button">清除全部紀錄</button>
 
+    <p class="msg" id="hist-persist" hidden></p>
     <p class="field-note">
       iOS 會在這個網站連續七天沒被開啟時，把它存的資料整包清掉——這是系統行為，不是這裡的設定。
       把頁面加到主畫面並偶爾打開，被清掉的機會比較低。
@@ -466,7 +467,7 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
 import { inspectFile, TIERS } from "./mp4-time.js";
 import { inspectPhoto, PHOTO_TIERS } from "./photo-time.js";
 import {
-  addRecord, listRecords, deleteRecord, clearAll, countRecords,
+  addRecord, listRecords, deleteRecord, clearAll, countRecords, persistStatus,
   buildRecord, requestPersist,
 } from "./history.js";
 import {
@@ -1183,6 +1184,7 @@ function histRow(r) {
 }
 
 async function renderHistory() {
+  showPersist();
   const err = $("hist-err");
   try {
     const rows = await listRecords();
@@ -1198,6 +1200,24 @@ async function renderHistory() {
                       "。無痕模式或關閉了網站資料時會這樣，合併功能本身不受影響。";
     err.hidden = false;
   }
+}
+
+/* 長期保存是「申請」不是保證，狀態要讓使用者看得到，別讓人以為紀錄一定留得住 */
+async function showPersist() {
+  const el = $("hist-persist");
+  const state = await persistStatus();
+  if (state === true) {
+    el.className = "msg good";
+    el.textContent = "已取得長期保存：這台裝置上的紀錄不會因為七天沒開啟而被系統清除。";
+  } else if (state === false) {
+    el.className = "msg info";
+    el.textContent = "未取得長期保存：連續七天沒開啟這個網站，紀錄可能被系統清掉。" +
+                     "把頁面加到主畫面並偶爾打開，取得的機會較高。";
+  } else {
+    el.className = "msg info";
+    el.textContent = "這個瀏覽器沒有提供長期保存的查詢介面，目前狀態無從得知。";
+  }
+  el.hidden = false;
 }
 
 function showHistory(on) {
