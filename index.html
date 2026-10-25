@@ -346,6 +346,14 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
         <p class="field-note">拖動會套用到所有片段；上方也可以單獨改某一段。</p>
       </div>
 
+      <div class="field">
+        <div class="field-head"><label for="flt">濾鏡</label></div>
+        <select id="flt" class="select"></select>
+        <p class="field-note">
+          套用到所有片段；某段想不一樣，在上方那一列單獨改。選「原色」時不經過濾鏡處理，合併速度不受影響。
+        </p>
+      </div>
+
       <div class="field" id="fx-field" hidden>
         <div class="field-head">
           <label for="fx">照片動態</label>
@@ -466,10 +474,12 @@ video { width: 100%; background: #000; display: block; border: 1px solid var(--l
 <script type="module">
 import { inspectFile, TIERS } from "./mp4-time.js";
 import { inspectPhoto, PHOTO_TIERS } from "./photo-time.js";
+/* ?v= 要跟著檔案改動遞增：Pages 回 max-age=600，不換網址 Safari 會拿新頁面配舊模組 */
 import {
   addRecord, listRecords, deleteRecord, clearAll, countRecords, persistStatus,
   buildRecord, requestPersist,
-} from "./history.js";
+} from "./history.js?v=2";
+import { FILTERS, createFilterRenderer } from "./color-filter.js?v=3";
 import {
   Input, BlobSource, ALL_FORMATS,
   Output, Mp4OutputFormat, BufferTarget,
@@ -492,6 +502,7 @@ const EFFECTS = {
   none:     "靜止不動",
 };
 let globalEffect = "zoomIn";
+let globalFilter = "none";
 
 const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, "0");
@@ -527,7 +538,9 @@ $("file").addEventListener("change", async e => {
         seconds: 3,
         overridden: false,
         effect: null,            // null = 跟隨全域設定
+        filter: null,
         thumb: null,
+        thumbBase: null,         // 未套濾鏡的縮圖畫布，換濾鏡時從這裡重算
         hasAudio: false,
       });
     } else {
@@ -540,7 +553,9 @@ $("file").addEventListener("change", async e => {
         seconds: Math.min(3, natural ?? 3),
         overridden: false,
         effect: null,
+        filter: null,
         thumb: null,
+        thumbBase: null,
         hasAudio: !!info.meta?.audio,
       });
     }
@@ -561,6 +576,24 @@ function isImage(f) {
 }
 
 const effectOf = c => c.effect ?? globalEffect;
+const filterOf = c => c.filter ?? globalFilter;
+
+/* 縮圖跟成品走同一個 shader，畫面上看到的顏色就是輸出的顏色 */
+let thumbRenderer = null;
+function shownThumb(c) {
+  const key = filterOf(c);
+  if (key === "none" || !c.thumbBase) return c.thumb;
+  if (c.thumbShown?.key !== key) {
+    try {
+      thumbRenderer ??= createFilterRenderer(92, 164);
+      const url = thumbRenderer.render(c.thumbBase, key).toDataURL("image/jpeg", 0.7);
+      c.thumbShown = { key, url };
+    } catch {
+      return c.thumb; /* 縮圖失敗不影響合併 */
+    }
+  }
+  return c.thumbShown.url;
+}
 
 /* ---------- 縮圖 ---------- */
 async function makeThumbs() {
@@ -580,6 +613,7 @@ async function makeThumbs() {
         cx.drawImage(bmp, (cv.width - w) / 2, (cv.height - h) / 2, w, h);
         bmp.close();
         c.thumb = cv.toDataURL("image/jpeg", 0.7);
+        c.thumbBase = cv;
         render();
       } catch { /* 縮圖失敗不影響合併 */ }
       continue;
@@ -593,6 +627,7 @@ async function makeThumbs() {
       const wrapped = await sink.getCanvas(0);
       if (!wrapped) continue;
       c.thumb = wrapped.canvas.toDataURL("image/jpeg", 0.7);
+      c.thumbBase = wrapped.canvas;
       render();
     } catch { /* 縮圖失敗不影響合併 */ }
   }
@@ -691,10 +726,16 @@ function render() {
          </select>`
       : "";
 
+    const fltSel = `<select class="select mini-sel flt-in" data-i="${i}" aria-label="這一段的濾鏡">
+         ${Object.entries(FILTERS).map(([k, { label }]) =>
+           `<option value="${k}"${filterOf(c) === k ? " selected" : ""}>${label}</option>`
+         ).join("")}
+       </select>`;
+
     return `
       <div class="clip">
         ${c.thumb
-          ? `<img class="thumb" src="${c.thumb}" alt="">`
+          ? `<img class="thumb" src="${shownThumb(c)}" alt="">`
           : `<div class="thumb-ph">${c.error ? "!" : "…"}</div>`}
         <div class="clip-body">
           <div class="kind">${photo ? "照片" : "影片"}</div>
@@ -711,6 +752,7 @@ function render() {
             <span class="unit">秒</span>
           </div>
           ${c.overridden ? '<span class="edited">已微調</span>' : ""}
+          ${fltSel}
           ${fxSel}
           <div class="moves">
             <button class="mini" data-up="${i}" ${i === 0 ? "disabled" : ""} aria-label="上移">↑</button>
@@ -747,7 +789,24 @@ $("clips").addEventListener("change", e => {
   if (sel) {
     clips[+sel.dataset.i].effect = sel.value;
     render();
+    return;
   }
+  const flt = e.target.closest(".flt-in");
+  if (flt) {
+    clips[+flt.dataset.i].filter = flt.value;
+    render();
+  }
+});
+
+$("flt").innerHTML = Object.entries(FILTERS)
+  .map(([k, { label }]) => `<option value="${k}"${k === globalFilter ? " selected" : ""}>${label}</option>`)
+  .join("");
+
+$("flt").addEventListener("change", e => {
+  globalFilter = e.target.value;
+  /* 跟照片動態一樣，全域設定要蓋掉先前的個別調整 */
+  for (const c of clips) c.filter = null;
+  render();
 });
 
 /* 全域動態選單 */
@@ -804,14 +863,28 @@ function drawPhoto(ctx, bmp, effect, t) {
 
 /* 只在最後一個片段的尾端收黑，用片段內的相對時間算，
    不必仰賴整支影片的預估總長 */
-function applyFade(ctx, active, localT, clipDur) {
-  if (!active) return;
+function fadeAlpha(active, localT, clipDur) {
+  if (!active) return 0;
   const span = Math.min(FADE_SEC, clipDur);
   const start = clipDur - span;
-  if (localT <= start) return;
-  const a = Math.min(1, (localT - start) / span);
+  if (localT <= start) return 0;
+  return Math.min(1, (localT - start) / span);
+}
+
+function applyFade(ctx, active, localT, clipDur) {
+  const a = fadeAlpha(active, localT, clipDur);
+  if (!a) return;
   ctx.fillStyle = `rgba(0,0,0,${a})`;
   ctx.fillRect(0, 0, OUT_W, OUT_H);
+}
+
+/* 合併用的濾鏡畫布只建一次、之後沿用；iOS 對同時存在的 WebGL context 數量有上限 */
+let mergeRenderer = null;
+function getMergeRenderer() {
+  if (!mergeRenderer || mergeRenderer.gl.isContextLost()) {
+    mergeRenderer = createFilterRenderer(OUT_W, OUT_H);
+  }
+  return mergeRenderer;
 }
 
 /* ---------- 合併 ---------- */
@@ -867,6 +940,23 @@ async function merge() {
   canvas.height = OUT_H;
   const ctx = canvas.getContext("2d", { alpha: false });
 
+  /* 全部都是原色就完全不碰 WebGL，維持原本的速度與路徑 */
+  const flt = clips.some(c => filterOf(c) !== "none") ? getMergeRenderer() : null;
+
+  /* 有濾鏡時淡出交給 shader，在調色之後才收黑；原色沿用原本的 2D 淡出 */
+  const finish = (key, fadeOn, localT, clipDur) => {
+    if (key === "none") {
+      applyFade(ctx, fadeOn, localT, clipDur);
+      return canvas;
+    }
+    const out = flt.render(canvas, key, { fade: fadeAlpha(fadeOn, localT, clipDur), frame: done });
+    /* context 被收回時 render 不會丟例外，只會畫出全黑——必須主動檢查，否則成品靜默變黑 */
+    if (flt.gl.isContextLost()) {
+      throw new Error("濾鏡處理到一半，系統收回了 GPU 資源（多半是記憶體不足）。請減少片段數，或把濾鏡改成「原色」再合併");
+    }
+    return out;
+  };
+
   const output = new Output({
     format: new Mp4OutputFormat({ fastStart: "in-memory" }),
     target: new BufferTarget(),
@@ -912,6 +1002,7 @@ async function merge() {
       }
 
       const effect = effectOf(c);
+      const key = filterOf(c);
       const frames = Math.max(1, Math.round(c.seconds * OUT_FPS));
       for (let f = 0; f < frames; f++) {
         const localT = f / OUT_FPS;
@@ -919,9 +1010,9 @@ async function merge() {
         ctx.fillStyle = "#000";
         ctx.fillRect(0, 0, OUT_W, OUT_H);
         drawPhoto(ctx, bmp, effect, t);
-        applyFade(ctx, isLast && fadeOut, localT, c.seconds);
+        const src = finish(key, isLast && fadeOut, localT, c.seconds);
 
-        const out = new VideoSample(canvas, {
+        const out = new VideoSample(src, {
           timestamp: offset + localT,
           duration: 1 / OUT_FPS,
         });
@@ -942,6 +1033,7 @@ async function merge() {
     if (!track) throw new Error(`${c.name} 沒有影像軌`);
 
     const sink = new VideoSampleSink(track);
+    const key = filterOf(c);
     let lastEnd = 0;
 
     for await (const s of sink.samples(0, c.seconds)) {
@@ -953,9 +1045,9 @@ async function merge() {
       const dur = s.duration > 0 ? s.duration : 1 / OUT_FPS;
       /* 先算完再 close，關掉之後不能再讀 sample 的屬性 */
       lastEnd = s.timestamp + dur;
-      applyFade(ctx, isLast && fadeOut, s.timestamp, c.seconds);
+      const src = finish(key, isLast && fadeOut, s.timestamp, c.seconds);
 
-      const out = new VideoSample(canvas, {
+      const out = new VideoSample(src, {
         timestamp: offset + s.timestamp,
         duration: dur,
       });
@@ -1106,13 +1198,15 @@ const FIT_LABEL = { contain: "完整不裁切", cover: "填滿裁切" };
 async function saveHistory(blob) {
   try {
     const rec = buildRecord({
-      clips,
+      /* 紀錄裡的縮圖存套完濾鏡的版本，才是成品實際的樣子 */
+      clips: clips.map(c => ({ ...c, thumb: shownThumb(c) })),
       settings: {
         perClipSeconds: parseFloat($("secs").value),
         fit: document.querySelector('input[name="fit"]:checked').value,
         keepAudio: $("audio").checked,
         fadeOut: $("fade").checked,
         globalEffect,
+        globalFilter,
       },
       outBytes: blob.size,
       outSeconds: totalSeconds(),
@@ -1152,6 +1246,9 @@ function histRow(r) {
     s.keepAudio ? "保留原音" : "靜音",
     s.fadeOut ? "結尾淡出" : null,
     photos ? `照片動態 ${EFFECTS[s.globalEffect] || s.globalEffect}` : null,
+    /* 加入濾鏡之前的紀錄沒有這個欄位，視同原色 */
+    s.globalFilter && s.globalFilter !== "none"
+      ? `濾鏡 ${FILTERS[s.globalFilter]?.label || s.globalFilter}` : null,
   ].filter(Boolean).join("  ·  ");
 
   const names = r.clips.map((c, i) => {
@@ -1162,6 +1259,7 @@ function histRow(r) {
       t.label,
       `${c.seconds} 秒`,
       c.kind === "photo" && c.effect ? (EFFECTS[c.effect] || c.effect) : null,
+      c.filter && c.filter !== "none" ? (FILTERS[c.filter]?.label || c.filter) : null,
       c.kind === "video" && !c.hasAudio ? "無音軌" : null,
     ].filter(Boolean).join("  ·  ");
     return `<li>${i + 1}. ${esc(c.name)}<br><span class="n-meta">${esc(meta)}</span></li>`;

@@ -129,6 +129,7 @@ export function buildRecord({ clips, settings, outBytes, outSeconds, outW, outH,
       keepAudio: !!settings.keepAudio,
       fadeOut: !!settings.fadeOut,
       globalEffect: settings.globalEffect,
+      globalFilter: settings.globalFilter ?? "none",
     },
     clips: clips.map(c => ({
       name: c.name,
@@ -138,6 +139,8 @@ export function buildRecord({ clips, settings, outBytes, outSeconds, outW, outH,
       seconds: c.seconds,
       // 照片沒單獨指定時是跟隨全域設定，存進紀錄時要解析成實際用的那一個
       effect: c.kind === "photo" ? (c.effect ?? settings.globalEffect) : null,
+      // 濾鏡影片與照片都有，同樣解析成實際套用的那一個
+      filter: c.filter ?? settings.globalFilter ?? "none",
       hasAudio: !!c.hasAudio,
       thumb: c.thumb || null,
     })),
