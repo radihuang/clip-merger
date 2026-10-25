@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Filter Probe</title>
+<style>
+:root {
+  --ground: #ECEEED; --surface: #FFFFFF; --sunk: #E2E5E4;
+  --ink: #16191A; --ink-2: #5A6163; --ink-3: #868F8C; --line: #CDD3D2;
+  --good: #0B6E63; --bad: #A32A22; --focus: #0B6E63;
+  --sans: -apple-system, BlinkMacSystemFont, "Noto Sans TC", "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #121514; --surface: #1A1E1D; --sunk: #0D100F;
+    --ink: #E6EAE8; --ink-2: #929B98; --ink-3: #6C7573; --line: #2E3533;
+    --good: #4ECDC0; --bad: #E8756A; --focus: #4ECDC0;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #121514; --surface: #1A1E1D; --sunk: #0D100F;
+  --ink: #E6EAE8; --ink-2: #929B98; --ink-3: #6C7573; --line: #2E3533;
+  --good: #4ECDC0; --bad: #E8756A; --focus: #4ECDC0;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; overflow-x: clip; }
+body { background: var(--ground); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.6; }
+.wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; display: flex; flex-direction: column; gap: 20px; }
+h1 { margin: 0; font-size: 22px; }
+h2 { margin: 0; font-size: 13px; font-family: var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+p { margin: 0; }
+.hint { font-size: 13px; color: var(--ink-2); }
+.card { background: var(--surface); border: 1px solid var(--line); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.btn {
+  font: 600 15px var(--sans); color: var(--surface); background: var(--ink);
+  border: 1px solid var(--ink); padding: 13px 20px; width: 100%; cursor: pointer;
+}
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--line); font-weight: 500; }
+.btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+input[type="file"] { display: none; }
+ul.res { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+ul.res li { font-family: var(--mono); font-size: 12px; word-break: break-word; }
+.pass { color: var(--good); } .fail { color: var(--bad); } .info { color: var(--ink-2); }
+textarea {
+  width: 100%; min-height: 180px; font: 11.5px var(--mono); color: var(--ink);
+  background: var(--sunk); border: 1px solid var(--line); padding: 8px;
+}
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.grid figure { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.grid img { width: 100%; aspect-ratio: 9 / 16; object-fit: cover; background: var(--sunk); display: block; }
+.grid figcaption { font-size: 12px; color: var(--ink-2); text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>濾鏡探針</h1>
+    <p class="hint">
+      驗證在這台裝置上，能不能用 WebGL 調色後再送進 H.264 編碼器，以及每格會多花多少時間。
+      按下方按鈕跑完全部測試，再把最下面的文字整段複製回來。
+    </p>
+  </header>
+
+  <button class="btn" id="run" type="button">開始測試</button>
+
+  <section class="card">
+    <h2>結果</h2>
+    <ul class="res" id="res"><li class="info">尚未執行</li></ul>
+  </section>
+
+  <section class="card">
+    <h2>肉眼檢查</h2>
+    <p class="hint">選一張照片或一支影片，看各濾鏡的效果。這一段不影響上面的測試結果。</p>
+    <button class="btn ghost" id="pick" type="button">選擇照片或影片</button>
+    <input type="file" id="file" accept="image/*,video/*">
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <section class="card">
+    <h2>回報用文字</h2>
+    <textarea id="report" readonly></textarea>
+    <button class="btn ghost" id="copy" type="button">複製</button>
+  </section>
+</div>
+
+<script type="module">
+import { FILTERS, applyMatrix, createFilterRenderer } from "./color-filter.js";
+import {
+  Input, BlobSource, ALL_FORMATS,
+  Output, Mp4OutputFormat, BufferTarget,
+  VideoSampleSource, VideoSample, CanvasSink,
+  QUALITY_HIGH, canEncodeVideo,
+} from "./mediabunny.min.mjs";
+
+const $ = id => document.getElementById(id);
+const W = 1080, H = 1920, FPS = 30;
+const lines = [];
+
+function log(kind, text) {
+  lines.push(`[${kind.toUpperCase()}] ${text}`);
+  const li = document.createElement("li");
+  li.className = kind;
+  li.textContent = (kind === "pass" ? "✓ " : kind === "fail" ? "✗ " : "· ") + text;
+  $("res").appendChild(li);
+  $("report").value = lines.join("\n");
+}
+
+const near = (a, b, tol) => a.every((v, i) => Math.abs(v - b[i]) <= tol);
+const fmt = a => `(${a.join(",")})`;
+
+async function encode(frames, drawFrame) {
+  const output = new Output({
+    format: new Mp4OutputFormat({ fastStart: "in-memory" }),
+    target: new BufferTarget(),
+  });
+  const vSrc = new VideoSampleSource({ codec: "avc", quality: QUALITY_HIGH, keyFrameInterval: 2 });
+  output.addVideoTrack(vSrc, { frameRate: FPS });
+  await output.start();
+  for (let f = 0; f < frames; f++) {
+    const s = new VideoSample(drawFrame(f), { timestamp: f / FPS, duration: 1 / FPS });
+    await vSrc.add(s);
+    s.close();
+  }
+  await output.finalize();
+  return new Blob([output.target.buffer], { type: "video/mp4" });
+}
+
+/* 取 (x,y) 周圍 9×9 的平均，壓掉 H.264 的區塊雜訊 */
+function sampleAvg(canvas, x, y) {
+  const d = canvas.getContext("2d").getImageData(x - 4, y - 4, 9, 9).data;
+  const sum = [0, 0, 0];
+  for (let i = 0; i < d.length; i += 4) { sum[0] += d[i]; sum[1] += d[i + 1]; sum[2] += d[i + 2]; }
+  return sum.map(v => Math.round(v / 81));
+}
+
+/* ---------- T1 環境 ---------- */
+async function testEnv() {
+  log("info", navigator.userAgent);
+  log(typeof VideoEncoder === "function" ? "pass" : "fail", "VideoEncoder " + (typeof VideoEncoder === "function" ? "存在" : "不存在"));
+  const ok = await canEncodeVideo("avc", { width: W, height: H, quality: QUALITY_HIGH });
+  log(ok ? "pass" : "fail", "H.264 1080×1920 編碼 " + (ok ? "可用" : "不可用"));
+  /* 確認 ctx.filter 真的不能用：有些環境屬性存在但不生效，所以實際畫一次看結果 */
+  const c = document.createElement("canvas");
+  c.width = c.height = 4;
+  const cx = c.getContext("2d");
+  cx.filter = "grayscale(1)";
+  cx.fillStyle = "rgb(255,0,0)";
+  cx.fillRect(0, 0, 4, 4);
+  const px = [...cx.getImageData(1, 1, 1, 1).data.slice(0, 3)];
+  const works = Math.abs(px[0] - px[1]) < 10;
+  log("info", `ctx.filter 參考：紅色套 grayscale 後為 ${fmt(px)}，${works ? "有生效" : "沒有生效"}`);
+  return ok;
+}
+
+/* ---------- T2 shader 正確性（GPU 輸出 vs JS 參考實作） ---------- */
+function testShader() {
+  const SW = 64, SH = 64;
+  const src = document.createElement("canvas");
+  src.width = SW; src.height = SH;
+  const sx = src.getContext("2d");
+  /* 四個象限不同色，順便驗上下左右沒有翻轉 */
+  const quads = [
+    { x: 0, y: 0, rgb: [200, 60, 40] },
+    { x: 32, y: 0, rgb: [40, 160, 70] },
+    { x: 0, y: 32, rgb: [40, 90, 200] },
+    { x: 32, y: 32, rgb: [230, 220, 120] },
+  ];
+  for (const q of quads) {
+    sx.fillStyle = `rgb(${q.rgb})`;
+    sx.fillRect(q.x, q.y, 32, 32);
+  }
+
+  const r = createFilterRenderer(SW, SH);
+  const gl = r.gl;
+  let failures = 0, checks = 0;
+  for (const key of Object.keys(FILTERS)) {
+    r.render(src, key);
+    for (const q of quads) {
+      const px = new Uint8Array(4);
+      /* readPixels 原點在左下角 */
+      gl.readPixels(q.x + 16, SH - 1 - (q.y + 16), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      const got = [px[0], px[1], px[2]];
+      const want = applyMatrix(FILTERS[key].m, q.rgb);
+      checks++;
+      if (!near(got, want, 2)) {
+        failures++;
+        log("fail", `shader ${key} ${fmt(q.rgb)}：GPU ${fmt(got)}，預期 ${fmt(want)}`);
+      }
+    }
+  }
+  log(failures ? "fail" : "pass", `shader 與 JS 參考實作比對 ${checks} 點，${failures} 點不符（容差 ±2）`);
+
+  /* 負對照：拿未套濾鏡的顏色當預期值，sepia 必須被判為不符，否則比對本身沒在比 */
+  r.render(src, "sepia");
+  const px = new Uint8Array(4);
+  gl.readPixels(16, SH - 1 - 16, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  const caught = !near([px[0], px[1], px[2]], quads[0].rgb, 2);
+  log(caught ? "pass" : "fail", `負對照：sepia 輸出 ${fmt([px[0], px[1], px[2]])} 與原色 ${fmt(quads[0].rgb)} ${caught ? "被判為不符" : "竟被判為相符"}`);
+  return !failures && caught;
+}
+
+/* ---------- T3 編碼來回：濾鏡後的顏色有沒有真的進到影片裡 ---------- */
+async function testRoundTrip(preserve) {
+  const tag = `preserveDrawingBuffer=${preserve}`;
+  const A = [200, 60, 40], B = [40, 90, 200];
+  const src = document.createElement("canvas");
+  src.width = W; src.height = H;
+  const sx = src.getContext("2d", { alpha: false });
+  sx.fillStyle = `rgb(${A})`; sx.fillRect(0, 0, W, H / 2);
+  sx.fillStyle = `rgb(${B})`; sx.fillRect(0, H / 2, W, H / 2);
+
+  const r = createFilterRenderer(W, H, { preserveDrawingBuffer: preserve });
+  let blob;
+  try {
+    blob = await encode(FPS, () => r.render(src, "sepia"));
+  } catch (e) {
+    log("fail", `${tag}：編碼失敗 ${e?.name || ""} ${e?.message || e}`);
+    return false;
+  }
+
+  const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(blob) });
+  const track = await input.getPrimaryVideoTrack();
+  const wrapped = await new CanvasSink(track).getCanvas(0.5);
+  if (!wrapped) { log("fail", `${tag}：解不回任何畫格`); return false; }
+  const top = sampleAvg(wrapped.canvas, W / 2, H / 4);
+  const bot = sampleAvg(wrapped.canvas, W / 2, H * 3 / 4);
+  const wantTop = applyMatrix(FILTERS.sepia.m, A);
+  const wantBot = applyMatrix(FILTERS.sepia.m, B);
+  /* H.264 加上 YUV 轉換，平坦色塊誤差通常在個位數 */
+  const TOL = 12;
+  const ok = near(top, wantTop, TOL) && near(bot, wantBot, TOL);
+  log(ok ? "pass" : "fail",
+    `${tag}：解碼後上半 ${fmt(top)} 預期 ${fmt(wantTop)}，下半 ${fmt(bot)} 預期 ${fmt(wantBot)}（容差 ±${TOL}）`);
+
+  const neg = near(top, A, TOL);
+  log(neg ? "fail" : "pass", `負對照：上半與未套濾鏡的 ${fmt(A)} ${neg ? "竟相符——濾鏡沒進到影片" : "不符，比對有效"}`);
+  if (wrapped.canvas.width !== W || wrapped.canvas.height !== H) {
+    log("info", `解碼尺寸 ${wrapped.canvas.width}×${wrapped.canvas.height}`);
+  }
+  return ok && !neg;
+}
+
+/* ---------- T4 速度：同樣內容，有無濾鏡各編一次 ---------- */
+async function testSpeed() {
+  const N = 90;
+  const src = document.createElement("canvas");
+  src.width = W; src.height = H;
+  const sx = src.getContext("2d", { alpha: false });
+  const grad = sx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, "#3a6"); grad.addColorStop(0.5, "#e94"); grad.addColorStop(1, "#36c");
+  const draw = f => {
+    sx.fillStyle = grad;
+    sx.fillRect(0, 0, W, H);
+    sx.fillStyle = "#fff";
+    sx.beginPath();
+    sx.arc(200 + f * 7, 400 + f * 12, 160, 0, Math.PI * 2);
+    sx.fill();
+  };
+
+  const r = createFilterRenderer(W, H);
+  const time = async useFilter => {
+    const t0 = performance.now();
+    await encode(N, f => { draw(f); return useFilter ? r.render(src, "vivid") : src; });
+    return (performance.now() - t0) / N;
+  };
+
+  /* 先暖機一次，避免第一輪吃到編碼器初始化的成本 */
+  await time(false);
+  const plain = await time(false);
+  const filtered = await time(true);
+  log("info", `每格耗時：無濾鏡 ${plain.toFixed(1)} ms，有濾鏡 ${filtered.toFixed(1)} ms，`
+    + `多 ${(filtered - plain).toFixed(1)} ms（${((filtered / plain - 1) * 100).toFixed(0)}%）`);
+  log("info", `換算：30 秒成品（${30 * FPS} 格）約多 ${((filtered - plain) * 30 * FPS / 1000).toFixed(1)} 秒`);
+  log(r.gl.isContextLost() ? "fail" : "pass", "WebGL context " + (r.gl.isContextLost() ? "已遺失" : "測完仍正常"));
+}
+
+$("run").addEventListener("click", async () => {
+  $("run").disabled = true;
+  $("res").innerHTML = "";
+  lines.length = 0;
+  try {
+    const encOk = await testEnv();
+    testShader();
+    if (encOk) {
+      await testRoundTrip(true);
+      await testRoundTrip(false);
+      await testSpeed();
+    } else {
+      log("info", "編碼器不可用，略過編碼來回與速度測試");
+    }
+    log("info", "全部跑完");
+  } catch (e) {
+    log("fail", `例外中止：${e?.name || ""} ${e?.message || e}`);
+  } finally {
+    $("run").disabled = false;
+  }
+});
+
+/* ---------- 肉眼檢查 ---------- */
+$("pick").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (!f) return;
+  const TW = 270, TH = 480;
+  const src = document.createElement("canvas");
+  src.width = TW; src.height = TH;
+  const sx = src.getContext("2d", { alpha: false });
+  sx.fillStyle = "#000";
+  sx.fillRect(0, 0, TW, TH);
+  try {
+    if (f.type.startsWith("video/") || /\.(mov|mp4|m4v)$/i.test(f.name)) {
+      const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(f) });
+      const track = await input.getPrimaryVideoTrack();
+      const w = await new CanvasSink(track, { width: TW, height: TH, fit: "cover" }).getCanvas(0);
+      sx.drawImage(w.canvas, 0, 0);
+    } else {
+      const bmp = await createImageBitmap(f, { imageOrientation: "from-image" });
+      const s = Math.max(TW / bmp.width, TH / bmp.height);
+      sx.drawImage(bmp, (TW - bmp.width * s) / 2, (TH - bmp.height * s) / 2, bmp.width * s, bmp.height * s);
+      bmp.close();
+    }
+  } catch (err) {
+    $("grid").textContent = "讀不到這個檔案：" + (err?.message || err);
+    return;
+  }
+  const r = createFilterRenderer(TW, TH);
+  $("grid").innerHTML = "";
+  for (const [key, { label }] of Object.entries(FILTERS)) {
+    r.render(src, key);
+    const fig = document.createElement("figure");
+    const img = document.createElement("img");
+    img.src = r.canvas.toDataURL("image/jpeg", 0.85);
+    img.alt = label;
+    const cap = document.createElement("figcaption");
+    cap.textContent = label;
+    fig.append(img, cap);
+    $("grid").appendChild(fig);
+  }
+});
+
+$("copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("report").value);
+    $("copy").textContent = "已複製";
+  } catch (e) {
+    $("report").select();
+    $("copy").textContent = `無法自動複製（${e?.name || "Error"}），已選取，請手動複製`;
+  }
+});
+</script>
+</body>
+</html>
