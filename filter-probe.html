@@ -52,7 +52,10 @@ textarea {
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
 .grid figure { margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .grid img { width: 100%; aspect-ratio: 9 / 16; object-fit: cover; background: var(--sunk); display: block; }
-.grid figcaption { font-size: 12px; color: var(--ink-2); text-align: center; }
+.grid figcaption, .trial figcaption { font-size: 12px; color: var(--ink-2); text-align: center; }
+.trial { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.trial figure { margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.trial video { width: 100%; aspect-ratio: 9 / 16; background: #000; display: block; }
 </style>
 </head>
 <body>
@@ -78,6 +81,9 @@ textarea {
     <button class="btn ghost" id="pick" type="button">選擇照片或影片</button>
     <input type="file" id="file" accept="image/*,video/*">
     <div class="grid" id="grid"></div>
+    <button class="btn ghost" id="trial" type="button" hidden>用這張做 3 秒試片（葡萄牙暖黃）</button>
+    <p class="hint">試片會編成真正的 H.264，看顆粒壓縮後是細緻的底片感，還是糊成色塊。</p>
+    <div class="trial" id="trial-out"></div>
   </section>
 
   <section class="card">
@@ -178,7 +184,7 @@ function testShader() {
   const gl = r.gl;
   let failures = 0, checks = 0;
   for (const key of Object.keys(FILTERS)) {
-    r.render(src, key);
+    r.render(src, key, { grain: false });
     for (const q of quads) {
       const px = new Uint8Array(4);
       /* readPixels 原點在左下角 */
@@ -194,13 +200,61 @@ function testShader() {
   }
   log(failures ? "fail" : "pass", `shader 與 JS 參考實作比對 ${checks} 點，${failures} 點不符（容差 ±2）`);
 
-  /* 負對照：拿未套濾鏡的顏色當預期值，sepia 必須被判為不符，否則比對本身沒在比 */
-  r.render(src, "sepia");
+  /* 負對照：拿未套濾鏡的顏色當預期值，mono 必須被判為不符，否則比對本身沒在比 */
+  r.render(src, "mono");
   const px = new Uint8Array(4);
   gl.readPixels(16, SH - 1 - 16, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
   const caught = !near([px[0], px[1], px[2]], quads[0].rgb, 2);
-  log(caught ? "pass" : "fail", `負對照：sepia 輸出 ${fmt([px[0], px[1], px[2]])} 與原色 ${fmt(quads[0].rgb)} ${caught ? "被判為不符" : "竟被判為相符"}`);
+  log(caught ? "pass" : "fail", `負對照：mono 輸出 ${fmt([px[0], px[1], px[2]])} 與原色 ${fmt(quads[0].rgb)} ${caught ? "被判為不符" : "竟被判為相符"}`);
   return !failures && caught;
+}
+
+/* ---------- T2b 顆粒：平均要等於無顆粒的顏色（不偏色），每格圖樣要不同 ---------- */
+function testGrain() {
+  const S = 128;
+  const src = document.createElement("canvas");
+  src.width = src.height = S;
+  const sx = src.getContext("2d");
+  sx.fillStyle = "rgb(128,128,128)";
+  sx.fillRect(0, 0, S, S);
+  const r = createFilterRenderer(S, S);
+  const gl = r.gl;
+  const read = () => {
+    const d = new Uint8Array(S * S * 4);
+    gl.readPixels(0, 0, S, S, gl.RGBA, gl.UNSIGNED_BYTE, d);
+    return d;
+  };
+  const stats = d => {
+    let sum = 0, sq = 0;
+    const n = d.length / 4;
+    for (let i = 0; i < d.length; i += 4) { sum += d[i + 1]; sq += d[i + 1] * d[i + 1]; }
+    const mean = sum / n;
+    return { mean, sd: Math.sqrt(sq / n - mean * mean) };
+  };
+
+  const want = applyMatrix(FILTERS.porto.m, [128, 128, 128])[1];
+  r.render(src, "porto", { frame: 1 });
+  const a = read();
+  const sa = stats(a);
+  r.render(src, "porto", { frame: 2 });
+  const b = read();
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 4) if (a[i + 1] !== b[i + 1]) diff++;
+  const diffPct = diff / (S * S) * 100;
+
+  /* 均勻分布 ±grain，標準差理論值為 grain×255/√3 */
+  const sdWant = FILTERS.porto.grain * 255 / Math.sqrt(3);
+  const okMean = Math.abs(sa.mean - want) < 1.5;
+  const okSd = Math.abs(sa.sd - sdWant) < sdWant * 0.25;
+  const okDiff = diffPct > 80;
+  log(okMean ? "pass" : "fail", `顆粒平均 G=${sa.mean.toFixed(1)}，無顆粒應為 ${want}（不偏色）`);
+  log(okSd ? "pass" : "fail", `顆粒標準差 ${sa.sd.toFixed(1)}，理論值 ${sdWant.toFixed(1)}`);
+  log(okDiff ? "pass" : "fail", `第 1、2 格有 ${diffPct.toFixed(0)}% 像素不同（每格換圖樣）`);
+
+  /* 負對照：沒有顆粒的濾鏡標準差必須是 0，否則上面量到的可能不是顆粒 */
+  r.render(src, "warm", { frame: 1 });
+  const sn = stats(read());
+  log(sn.sd < 0.5 ? "pass" : "fail", `負對照：暖色（無顆粒）標準差 ${sn.sd.toFixed(2)}`);
 }
 
 /* ---------- T3 編碼來回：濾鏡後的顏色有沒有真的進到影片裡 ---------- */
@@ -216,7 +270,7 @@ async function testRoundTrip(preserve) {
   const r = createFilterRenderer(W, H, { preserveDrawingBuffer: preserve });
   let blob;
   try {
-    blob = await encode(FPS, () => r.render(src, "sepia"));
+    blob = await encode(FPS, () => r.render(src, "mono"));
   } catch (e) {
     log("fail", `${tag}：編碼失敗 ${e?.name || ""} ${e?.message || e}`);
     return false;
@@ -228,8 +282,8 @@ async function testRoundTrip(preserve) {
   if (!wrapped) { log("fail", `${tag}：解不回任何畫格`); return false; }
   const top = sampleAvg(wrapped.canvas, W / 2, H / 4);
   const bot = sampleAvg(wrapped.canvas, W / 2, H * 3 / 4);
-  const wantTop = applyMatrix(FILTERS.sepia.m, A);
-  const wantBot = applyMatrix(FILTERS.sepia.m, B);
+  const wantTop = applyMatrix(FILTERS.mono.m, A);
+  const wantBot = applyMatrix(FILTERS.mono.m, B);
   /* H.264 加上 YUV 轉換，平坦色塊誤差通常在個位數 */
   const TOL = 12;
   const ok = near(top, wantTop, TOL) && near(bot, wantBot, TOL);
@@ -262,19 +316,21 @@ async function testSpeed() {
   };
 
   const r = createFilterRenderer(W, H);
-  const time = async useFilter => {
+  const time = async key => {
     const t0 = performance.now();
-    await encode(N, f => { draw(f); return useFilter ? r.render(src, "vivid") : src; });
+    await encode(N, f => { draw(f); return key ? r.render(src, key, { frame: f }) : src; });
     return (performance.now() - t0) / N;
   };
 
   /* 先暖機一次，避免第一輪吃到編碼器初始化的成本 */
-  await time(false);
-  const plain = await time(false);
-  const filtered = await time(true);
-  log("info", `每格耗時：無濾鏡 ${plain.toFixed(1)} ms，有濾鏡 ${filtered.toFixed(1)} ms，`
-    + `多 ${(filtered - plain).toFixed(1)} ms（${((filtered / plain - 1) * 100).toFixed(0)}%）`);
-  log("info", `換算：30 秒成品（${30 * FPS} 格）約多 ${((filtered - plain) * 30 * FPS / 1000).toFixed(1)} 秒`);
+  await time(null);
+  const plain = await time(null);
+  for (const key of ["vivid", "porto"]) {
+    const t = await time(key);
+    log("info", `每格耗時：無濾鏡 ${plain.toFixed(1)} ms，${FILTERS[key].label} ${t.toFixed(1)} ms，`
+      + `多 ${(t - plain).toFixed(1)} ms（${((t / plain - 1) * 100).toFixed(0)}%），`
+      + `30 秒成品約多 ${((t - plain) * 30 * FPS / 1000).toFixed(1)} 秒`);
+  }
   log(r.gl.isContextLost() ? "fail" : "pass", "WebGL context " + (r.gl.isContextLost() ? "已遺失" : "測完仍正常"));
 }
 
@@ -285,6 +341,7 @@ $("run").addEventListener("click", async () => {
   try {
     const encOk = await testEnv();
     testShader();
+    testGrain();
     if (encOk) {
       await testRoundTrip(true);
       await testRoundTrip(false);
@@ -301,33 +358,45 @@ $("run").addEventListener("click", async () => {
 });
 
 /* ---------- 肉眼檢查 ---------- */
+let picked = null;
+let trialUrls = [];
+
+/* 照片或影片第一格以 cover 畫滿指定尺寸的畫布 */
+async function coverCanvas(f, TW, TH) {
+  const src = document.createElement("canvas");
+  src.width = TW; src.height = TH;
+  const sx = src.getContext("2d", { alpha: false });
+  sx.fillStyle = "#000";
+  sx.fillRect(0, 0, TW, TH);
+  if (f.type.startsWith("video/") || /\.(mov|mp4|m4v)$/i.test(f.name)) {
+    const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(f) });
+    const track = await input.getPrimaryVideoTrack();
+    const w = await new CanvasSink(track, { width: TW, height: TH, fit: "cover" }).getCanvas(0);
+    sx.drawImage(w.canvas, 0, 0);
+  } else {
+    const bmp = await createImageBitmap(f, { imageOrientation: "from-image" });
+    const s = Math.max(TW / bmp.width, TH / bmp.height);
+    sx.drawImage(bmp, (TW - bmp.width * s) / 2, (TH - bmp.height * s) / 2, bmp.width * s, bmp.height * s);
+    bmp.close();
+  }
+  return src;
+}
+
 $("pick").addEventListener("click", () => $("file").click());
 $("file").addEventListener("change", async e => {
   const f = e.target.files[0];
   e.target.value = "";
   if (!f) return;
   const TW = 270, TH = 480;
-  const src = document.createElement("canvas");
-  src.width = TW; src.height = TH;
-  const sx = src.getContext("2d", { alpha: false });
-  sx.fillStyle = "#000";
-  sx.fillRect(0, 0, TW, TH);
+  let src;
   try {
-    if (f.type.startsWith("video/") || /\.(mov|mp4|m4v)$/i.test(f.name)) {
-      const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(f) });
-      const track = await input.getPrimaryVideoTrack();
-      const w = await new CanvasSink(track, { width: TW, height: TH, fit: "cover" }).getCanvas(0);
-      sx.drawImage(w.canvas, 0, 0);
-    } else {
-      const bmp = await createImageBitmap(f, { imageOrientation: "from-image" });
-      const s = Math.max(TW / bmp.width, TH / bmp.height);
-      sx.drawImage(bmp, (TW - bmp.width * s) / 2, (TH - bmp.height * s) / 2, bmp.width * s, bmp.height * s);
-      bmp.close();
-    }
+    src = await coverCanvas(f, TW, TH);
   } catch (err) {
     $("grid").textContent = "讀不到這個檔案：" + (err?.message || err);
     return;
   }
+  picked = f;
+  $("trial").hidden = false;
   const r = createFilterRenderer(TW, TH);
   $("grid").innerHTML = "";
   for (const [key, { label }] of Object.entries(FILTERS)) {
@@ -340,6 +409,44 @@ $("file").addEventListener("change", async e => {
     cap.textContent = label;
     fig.append(img, cap);
     $("grid").appendChild(fig);
+  }
+});
+
+/* 顆粒是最難壓縮的內容：每格隨機、沒有任何像素能沿用上一格。
+   在固定目標位元率下它會被壓成色塊還是保住，只有真的編一次才知道 */
+$("trial").addEventListener("click", async () => {
+  if (!picked) return;
+  const btn = $("trial");
+  btn.disabled = true;
+  for (const u of trialUrls) URL.revokeObjectURL(u);
+  trialUrls = [];
+  try {
+    const src = await coverCanvas(picked, W, H);
+    const r = createFilterRenderer(W, H);
+    const out = [];
+    for (const grain of [true, false]) {
+      btn.textContent = `編碼中（${grain ? "有" : "無"}顆粒）…`;
+      const blob = await encode(3 * FPS, f => r.render(src, "porto", { frame: f, grain }));
+      out.push({ grain, blob, mbps: blob.size * 8 / 3 / 1e6 });
+    }
+    $("trial-out").innerHTML = "";
+    for (const o of out) {
+      const fig = document.createElement("figure");
+      const v = document.createElement("video");
+      v.src = URL.createObjectURL(o.blob);
+      trialUrls.push(v.src);
+      v.controls = v.loop = v.muted = v.playsInline = true;
+      const cap = document.createElement("figcaption");
+      cap.textContent = `${o.grain ? "有顆粒" : "無顆粒"} · ${(o.blob.size / 1048576).toFixed(1)} MB · ${o.mbps.toFixed(2)} Mbps`;
+      fig.append(v, cap);
+      $("trial-out").appendChild(fig);
+    }
+    log("info", `試片 3 秒：有顆粒 ${out[0].mbps.toFixed(2)} Mbps，無顆粒 ${out[1].mbps.toFixed(2)} Mbps（目標 6.11）`);
+  } catch (err) {
+    log("fail", `試片失敗：${err?.name || ""} ${err?.message || err}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "用這張做 3 秒試片（葡萄牙暖黃）";
   }
 });
 

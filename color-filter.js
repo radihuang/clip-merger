@@ -27,7 +27,7 @@ export function mul(a, b) {
   return out;
 }
 
-/* 係數取自 Filter Effects 規格的 saturate 與 sepia */
+/* 係數取自 Filter Effects 規格的 saturate */
 function saturate(s) {
   return [
     0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s, 0, 0,
@@ -54,12 +54,20 @@ const lift = v => channels([1 - v, 1 - v, 1 - v], [v, v, v]);
 export const FILTERS = {
   none:  { label: "原色", m: I },
   mono:  { label: "黑白", m: saturate(0) },
-  sepia: { label: "復古", m: [
-    0.393, 0.769, 0.189, 0, 0,
-    0.349, 0.686, 0.168, 0, 0,
-    0.272, 0.534, 0.131, 0, 0,
-    0, 0, 0, 1, 0,
-  ] },
+  /* 仿 iPhone 攝影風格 Amber，Tone -73／Color 41／Film 10／Grain／白平衡陰天。
+     Apple 沒有公開這些滑桿的算法，而且它會分區處理（膚色、天空各自保護），
+     這裡只能用一個全畫面的線性矩陣近似，數值是對著測試色塊調出來的，不是換算。
+     套用順序同拍攝流程：白平衡 → Tone → Color → 琥珀底色 → Film */
+  porto: {
+    label: "葡萄牙暖黃",
+    m: mul(channels([0.97, 0.97, 0.97]),                       // Film 10：高光稍收
+       mul(channels([1.03, 1.0, 0.92], [0.015, 0.008, 0]),     // 琥珀底色
+       mul(saturate(1.16),                                     // Color 41
+       mul(mul(contrast(0.92), lift(0.09)),                     // Tone -73：抬暗部、壓對比
+           channels([1.03, 1.0, 0.95])))))                     // 白平衡陰天
+    ,
+    grain: 0.035,
+  },
   warm:  { label: "暖色", m: channels([1.08, 1.0, 0.86], [0.02, 0.01, 0]) },
   cool:  { label: "冷色", m: channels([0.9, 1.0, 1.08], [0, 0.01, 0.03]) },
   vivid: { label: "鮮豔", m: mul(contrast(1.1), saturate(1.4)) },
@@ -87,18 +95,34 @@ void main() {
   gl_Position = vec4(p, 0.0, 1.0);
 }`;
 
+/* 雜湊要 highp：像素座標到 1920，mediump 只有 10 位尾數，顆粒會排成條紋。
+   不用常見的 fract(sin(...))，sin 在行動 GPU 上大引數的精度更差 */
 const FS = `
+#ifdef GL_FRAGMENT_PRECISION_HIGH
+precision highp float;
+#else
 precision mediump float;
+#endif
 varying vec2 uv;
 uniform sampler2D img;
 uniform mat4 m;
 uniform vec4 o;
 uniform float keep;
+uniform float grain;
+uniform float seed;
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 void main() {
   vec4 c = texture2D(img, uv);
-  vec4 r = m * c + o;
+  vec3 r = clamp((m * c + o).rgb, 0.0, 1.0);
+  // 顆粒只加亮度、三通道同值，不會帶出彩色雜點；每格換 seed 才像底片而不是髒鏡頭
+  float n = hash12(gl_FragCoord.xy + seed * vec2(37.0, 17.0)) - 0.5;
+  r = clamp(r + n * 2.0 * grain, 0.0, 1.0);
   // 淡出在濾鏡之後才收黑，否則「褪色」抬起的黑位會讓結尾收不到全黑
-  gl_FragColor = vec4(clamp(r.rgb, 0.0, 1.0) * keep, 1.0);
+  gl_FragColor = vec4(r * keep, 1.0);
 }`;
 
 function compile(gl, type, src) {
@@ -149,12 +173,18 @@ export function createFilterRenderer(width, height, { preserveDrawingBuffer = tr
   const uM = gl.getUniformLocation(prog, "m");
   const uO = gl.getUniformLocation(prog, "o");
   const uKeep = gl.getUniformLocation(prog, "keep");
+  const uGrain = gl.getUniformLocation(prog, "grain");
+  const uSeed = gl.getUniformLocation(prog, "seed");
   gl.uniform1i(gl.getUniformLocation(prog, "img"), 0);
   gl.viewport(0, 0, width, height);
 
-  /* fade 為 0–1，1 表示全黑 */
-  function render(src, key, fade = 0) {
-    const m = (FILTERS[key] ?? FILTERS.none).m;
+  /* fade 為 0–1，1 表示全黑；frame 決定顆粒圖樣，同一格同一個值才能重現；
+     grain: false 只給測試用，拿掉顆粒才能跟 applyMatrix 逐點比對 */
+  function render(src, key, { fade = 0, frame = 0, grain = true } = {}) {
+    const f = FILTERS[key] ?? FILTERS.none;
+    const m = f.m;
+    gl.uniform1f(uGrain, grain ? (f.grain ?? 0) : 0);
+    gl.uniform1f(uSeed, frame % 1000);
     /* WebGL1 的 uniformMatrix4fv 只收欄優先，transpose 必須是 false */
     const colMajor = new Float32Array(16);
     for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) colMajor[c * 4 + r] = m[r * 5 + c];
