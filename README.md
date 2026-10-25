@@ -363,6 +363,15 @@ Chrome／Firefox／Edge 因為沒有 HEVC 授權而完全不能解 HEIC。
 本來就是 9:16 的直式照片，cover 之後幾乎沒有多餘畫面可以移動，
 只能靠 `PAN_ZOOM` 撐出約 378 px 的行程。橫式照片的平移會明顯得多。
 
+**剛更新完，濾鏡探針整排失敗、畫面全黑或出現 `undefined is not an object`**
+瀏覽器拿新頁面配了舊模組。GitHub Pages 回 `cache-control: max-age=600`，
+重新整理只會換掉頁面本身，被它 import 的 `.js` 在 10 分鐘內仍用快取。
+2026-10-25 實際發生過一次：iPhone 跑新版探針、舊版 `color-filter.js`，
+新的呼叫方式被舊函式當成淡出參數，`1 - {}` 得 `NaN`，28 點全部輸出 (0,0,0)。
+現在 `color-filter.js` 匯出 `VERSION`，import 端帶 `?v=`，探針一開始就比對，
+不符時只會顯示一行「模組是舊版」。**改 `color-filter.js` 時三個地方要一起改**：
+`VERSION`、import 的 `?v=`、探針的 `WANT_VERSION`。
+
 **字體看起來不對**
 Google Fonts 沒載入成功。功能不受影響，會退回系統字體。
 

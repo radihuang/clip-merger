@@ -94,7 +94,8 @@ textarea {
 </div>
 
 <script type="module">
-import { FILTERS, applyMatrix, createFilterRenderer } from "./color-filter.js";
+import { FILTERS, applyMatrix, createFilterRenderer, VERSION } from "./color-filter.js?v=3";
+const WANT_VERSION = 3;
 import {
   Input, BlobSource, ALL_FORMATS,
   Output, Mp4OutputFormat, BufferTarget,
@@ -339,6 +340,12 @@ $("run").addEventListener("click", async () => {
   $("res").innerHTML = "";
   lines.length = 0;
   try {
+    /* 版本不符時後面每一項都會以看似 shader 壞掉的方式失敗，先擋下來講清楚 */
+    if (VERSION !== WANT_VERSION) {
+      log("fail", `color-filter.js 是舊版（${VERSION ?? "無版本號"}，應為 ${WANT_VERSION}），瀏覽器用了快取。請過 10 分鐘再重新整理`);
+      return;
+    }
+    log("pass", `color-filter.js 版本 ${VERSION}`);
     const encOk = await testEnv();
     testShader();
     testGrain();

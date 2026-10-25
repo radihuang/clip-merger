@@ -7,6 +7,10 @@
    矩陣為列優先，每列是輸出的 R G B A，五欄依序乘輸入的 r g b a 再加常數偏移，
    數值在 0–1 尺度，作用在 sRGB 編碼值上（與 CSS filter 的做法相同）。 */
 
+/* 改這支檔案就要一起改這裡，以及 import 端的 ?v=。
+   GitHub Pages 回 max-age=600，Safari 會拿新頁面配舊模組，症狀看起來像程式壞掉 */
+export const VERSION = 3;
+
 const I = [
   1, 0, 0, 0, 0,
   0, 1, 0, 0, 0,
